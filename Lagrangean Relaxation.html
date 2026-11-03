@@ -765,7 +765,7 @@
     CONS.forEach((k, i) => {
       const [p, q] = lineThrough(k.e, k.b / k.n);
       const ln = el("line", { x1: px(p)[0], y1: px(p)[1], x2: px(q)[0], y2: px(q)[1] }, regions);
-      ln.style.stroke = "var(--cons)";
+      ln.style.stroke = `var(${NCOL[i]})`;
       if (R.includes(i)) ln.setAttribute("stroke-dasharray", "8 5");
       ln.setAttribute("stroke-width", R.includes(i) ? 1.6 : 2.2);
       hitLine(px(p), px(q), "k" + (i + 1), regions);
@@ -906,7 +906,7 @@
     CONS.forEach((k, i) => {
       const j = String(i + 1);
       // Fixed spot (labels of fixed objects don't move); the text's outline keeps it legible over lines.
-      want([["A", "it"], [j, "sub"], ["T", "sup"], ["x", "it"], [" ≤ ", ""], ["b", "it"], [j, "sub"]], { "data-lab": "k" + j },
+      want([["A", "it"], [j, "sub"], ["T", "sup"], ["x", "it"], [" ≤ ", ""], ["b", "it"], [j, "sub"]], { "data-lab": "k" + j, style: `fill:var(${NCOL[i]})` },
            fixedAt(k.labelAt, k.anchor));
     });
     want([["X", "it"], ["LP", "sub"]], { "font-size": 22, "data-lab": "X_LP" }, () => [px(XLP_LABEL)]);
