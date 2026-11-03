@@ -141,11 +141,7 @@
   .mapmode { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 4px 14px;
              font-size: 0.9rem; color: var(--muted); margin-bottom: 4px; }
   .mapmode label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
-  .mapmode[hidden], .maplegend[hidden] { display: none; }
-  .maplegend { display: inline-flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
-  /* viridis, low -> high; must match RAMP in the script */
-  .maplegend .ramp { width: 90px; height: 10px; border-radius: 2px;
-                     background: linear-gradient(to right, #440154, #3b528b, #21918c, #5ec962, #fde725); }
+  .mapmode[hidden] { display: none; }
   .dualcap { font-size: 0.9rem; color: var(--muted); text-align: center; line-height: 1.6; margin: 4px 8px 0; }
 </style>
 </head>
@@ -183,10 +179,9 @@
   <div class="dual" id="dual">
     <div class="mapmode" id="mapmode">
       Mode:
-      <label><input type="radio" name="mapmode" value="3d" checked> 3D</label>
-      <label><input type="radio" name="mapmode" value="vertex"> 2D: Optimum color</label>
-      <label><input type="radio" name="mapmode" value="value"> 2D: Value of <i>h</i><sub>LP</sub>(<i>u</i>)</label>
-      <span class="maplegend" id="maplegend"><span id="maplo"></span><span class="ramp"></span><span id="maphi"></span></span>
+      <label><input type="radio" name="mapmode" value="3d" checked> <span>3D</span></label>
+      <label><input type="radio" name="mapmode" value="vertex"> <span>2D: Optimum color</span></label>
+      <label><input type="radio" name="mapmode" value="value"> <span>2D: Value of <i>h</i><sub>LP</sub>(<i>u</i>)</span></label>
     </div>
     <svg id="dualfig" viewBox="0 0 720 290" role="img" aria-label="The dual function h_LP plotted against the Lagrangean prices."></svg>
     <div class="dualcap" id="dualcap"></div>
@@ -962,9 +957,8 @@
   let pick = null;                  // (x, y) in panel coordinates -> sets sliders
   let pickArea = null;              // [x0, y0, x1, y1] where a drag may start
   let mapCache = { key: null, url: null, opt: null };
-  const RAMP = ["#440154", "#3b528b", "#21918c", "#5ec962", "#fde725"];   // viridis; see .maplegend .ramp
-  const modeBox = document.getElementById("mapmode"), legend = document.getElementById("maplegend");
-  const mapLo = document.getElementById("maplo"), mapHi = document.getElementById("maphi");
+  const RAMP = ["#440154", "#3b528b", "#21918c", "#5ec962", "#fde725"];   // viridis, low -> high
+  const modeBox = document.getElementById("mapmode");
   let mapMode = "3d";                                              // dual map: "3d" | "vertex" | "value"
 
   const niceStep = span => {
@@ -1027,7 +1021,7 @@
   function dual3D(R, P, u, best, h) {
     const U = [+sliders[0].max, +sliders[1].max];
     const F = faces3d(R, P, U), { lo, hi } = F, ZS = 1.1;
-    modeBox.hidden = false; legend.hidden = true;
+    modeBox.hidden = false;
     // World coordinates: u in [-1, 1]^2, height in [-ZS/2, ZS/2]; then rotate (azimuth) and tilt (elevation).
     const ca = Math.cos(view3d.az), sa = Math.sin(view3d.az), ce = Math.cos(view3d.el), se = Math.sin(view3d.el);
     const SC = 100, CX = DW / 2, CY = 138;
@@ -1195,8 +1189,17 @@
     const key = JSON.stringify([P.map(p => p.v), U, mapMode, cssVar("--bg"), cssVar("--fg")]);
     if (mapCache.key !== key) mapCache = { key, ...buildMap(R, P, U, mapMode) };
     modeBox.hidden = false;
-    legend.hidden = mapMode !== "value";
-    if (mapMode === "value") { mapLo.textContent = fmt(mapCache.lo); mapHi.textContent = fmt(mapCache.hi); }
+    // Value mode: vertical colour bar to the right of the map, low at the bottom.
+    if (mapMode === "value") {
+      const BX = X0 + SIDE + 56, BW = 12;
+      el("defs", {}, dsvg).innerHTML = `<linearGradient id="hramp" x1="0" y1="1" x2="0" y2="0">` +
+        RAMP.map((c, n) => `<stop offset="${n / (RAMP.length - 1)}" stop-color="${c}"/>`).join("") + "</linearGradient>";
+      const bar = el("rect", { x: BX, y: Y0, width: BW, height: SIDE, fill: "url(#hramp)", "stroke-width": 1 }, dsvg);
+      bar.style.stroke = "var(--axis)";
+      labelPx(BX + BW + 6, Y0 + 5, [[fmt(mapCache.hi), ""]], { class: "small" }, dsvg);
+      labelPx(BX + BW + 6, Y0 + SIDE + 5, [[fmt(mapCache.lo), ""]], { class: "small" }, dsvg);
+      labelPx(BX + BW + 6, Y0 + SIDE / 2 + 5, [["h", "it"], ["LP", "sub"]], { class: "small" }, dsvg);
+    }
 
     if (mapCache.url) el("image", { href: mapCache.url, x: X0, y: Y0, width: SIDE, height: SIDE, preserveAspectRatio: "none" }, dsvg);
     const ut = U.map(v => (v <= 3 ? 0.5 : niceStep(v)));
