@@ -10,7 +10,8 @@
   Problem shown:   min c^T x   s.t.  A_i^T x <= b_i  (i = 1, 2),   x in X_LP
   Relaxation:      h_LP(u) = min { c^T x + sum_{i in R} u_i (A_i^T x - b_i) :
                                    x in X_LP,  A_k^T x <= b_k  (k not in R) }
-  where R is the set of relaxed constraints, chosen with the checkboxes. h_LP(u) <= z_LP.
+  where R is the set of relaxed constraints, chosen with the checkboxes beside the constraint rows
+  of the system at the top (checked = relaxed). h_LP(u) <= z_LP.
 
   The vectors A_i are the constraint normals (pointing out of the feasible side), used exactly
   as written in CONFIG (not rescaled). Appending u_i A_i for i in R to c gives the penalised
@@ -30,7 +31,8 @@
   Embed with e.g.  <iframe src="lagrangean-relaxation.html?u1=0.8&u2=0.5" width="760" height="1100"></iframe>
   Optional URL parameters: u1, u2 (initial prices; u sets both), relax=12 | 1 | 2 | none
   (default: none, or the constraints whose price is given),
-  dual=0 (hide the dual-function panel), theme=dark (default light), side=1 (dual-function panel beside the figure), map=3d | vertex | value (3-D graph, the default; or a 2-D map coloured by optimal extreme point or by the value of h_LP).
+  dual=0 (hide the dual-function panel), labels=1 (start with all of the figure's labels shown;
+  by default a label appears while hovering over its object), theme=dark (default light), side=1 (dual-function panel beside the figure), map=3d | vertex | value (3-D graph, the default; or a 2-D map coloured by optimal extreme point or by the value of h_LP).
   Geometry is set in the CONFIG block in the script below.
 -->
 <style>
@@ -74,13 +76,20 @@
   .cbtn:hover { color: var(--fg); border-color: var(--axis); }
   /* Room for the tallest form (nothing relaxed: objective + 2 constraints + x ∈ X_LP = 4 rows), so the page doesn't jump */
   .formula { display: flex; justify-content: center; align-items: flex-start; font-size: 1.05rem; margin: 4px 0 8px; line-height: 1.6; min-height: calc(4 * 1.6em); }
-  .formula .f { display: grid; grid-template-columns: auto auto auto; column-gap: 0.6em; align-items: baseline; }
+  .formula .f { display: grid; grid-template-columns: auto auto auto auto; column-gap: 0.6em; align-items: baseline; }
   .formula .op { text-align: left; }
   .formula i, svg .it { font-style: italic; }
   svg { width: 100%; height: auto; display: block; user-select: none; }
   svg text { fill: var(--fg); font-size: 17px;
              paint-order: stroke; stroke: var(--bg); stroke-width: 4px; stroke-linejoin: round; }
   svg .small { font-size: 14px; fill: var(--muted); }
+  /* A label shows while the pointer is over its object (its hover target) or when pinned; a shown
+     label can be clicked to unpin it. */
+  #fig text { pointer-events: none; }
+  #fig text[data-lab]:not(.show) { visibility: hidden; }
+  #fig text[data-lab].show { pointer-events: auto; cursor: pointer; }
+  #fig .hit { fill: none; stroke: transparent; pointer-events: stroke; }
+  #fig .hitarea { fill: transparent; stroke: none; }
   .controls { display: flex; align-items: center; gap: 12px; margin-top: 8px; padding-bottom: 12px; font-size: 1.05rem; }   /* room for the ticks */
   .controls .track { position: relative; flex: 1; min-width: 120px; display: flex; }
   .controls .track input[type=range] { flex: 1; width: 100%; margin: 0; }
@@ -96,13 +105,18 @@
   .options { margin: 4px 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--grid); font-size: 0.95rem; }
   .options summary { cursor: pointer; color: var(--muted); }
   .options label { display: inline-flex; align-items: center; gap: 6px; margin: 6px 20px 0 0; cursor: pointer; }
-  .controls .relax { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; white-space: nowrap; }
+  .options .btns { display: flex; gap: 8px; margin-top: 8px; }
+  .options button { padding: 3px 10px; border: 1px solid var(--grid); border-radius: 6px; background: var(--bg);
+                    color: var(--fg); font: inherit; cursor: pointer; }
+  .options button:hover { border-color: var(--axis); }
   /* Slider of a constraint that is not relaxed: greyed out */
   .controls.off label[for], .controls.off .uval, .controls.off input[type=range] { opacity: 0.4; }
   .controls input[type=range]:disabled { cursor: not-allowed; }
   .wrap sub, .wrap sup { line-height: 0; }   /* keep scripts from stretching the line box */
-  #relax1, #u1 { accent-color: var(--n1); }
-  #relax2, #u2 { accent-color: var(--n2); }
+  #u1, .relax1 { accent-color: var(--n1); }
+  #u2, .relax2 { accent-color: var(--n2); }
+  .formula label.relax { margin-left: 0.3em; cursor: pointer; white-space: nowrap; }
+  .formula label.relax input { margin: 0 0.2em 0 0; cursor: pointer; vertical-align: middle; }
   .uval { min-width: 4.5em; font-variant-numeric: tabular-nums; }
   .readout { margin-top: 6px; font-size: 0.95rem; color: var(--muted); text-align: center;
              font-variant-numeric: tabular-nums; line-height: 1.7; }
@@ -147,18 +161,20 @@
   <details class="options">
     <summary>Options</summary>
     <label><input type="checkbox" id="optVectors" checked> Penalty vectors</label>
-    <label><input type="checkbox" id="optBoxes" checked> Penalty boxes</label>
+    <label><input type="checkbox" id="optBoxes"> Penalty boxes</label>
     <label><input type="checkbox" id="optFit"> Fit graph</label>
     <label><input type="checkbox" id="optSide"> Side by side</label>
+    <div class="btns">
+      <button type="button" id="showLabels">Show all labels</button>
+      <button type="button" id="hideLabels">Hide all labels</button>
+    </div>
   </details>
   <div class="controls" id="row1">
-    <label class="relax"><input type="checkbox" id="relax1"> <span>Relax <i>A</i><sub>1</sub><sup>T</sup><i>x</i> ≤ <i>b</i><sub>1</sub></span></label>
     <label for="u1"><i>u</i><sub>1</sub></label>
     <span class="track"><input id="u1" type="range" min="0" max="2.5" step="0.01" value="0"><span class="ticks" id="ticks1"></span></span>
     <span class="uval" id="uval1">= 0.00</span>
   </div>
   <div class="controls" id="row2">
-    <label class="relax"><input type="checkbox" id="relax2"> <span>Relax <i>A</i><sub>2</sub><sup>T</sup><i>x</i> ≤ <i>b</i><sub>2</sub></span></label>
     <label for="u2"><i>u</i><sub>2</sub></label>
     <span class="track"><input id="u2" type="range" min="0" max="2.5" step="0.01" value="0"><span class="ticks" id="ticks2"></span></span>
     <span class="uval" id="uval2">= 0.00</span>
@@ -250,8 +266,14 @@
     return e;
   }
   const pts = poly => poly.map(p => px(p).map(v => v.toFixed(2)).join(",")).join(" ");
+  // Hover target (px) for the labels with key(s) hl, used when the "Labels" option is off: an invisible
+  // wide line along a thin stroke. Larger shapes carry data-hl themselves.
+  const hitLine = ([x1, y1], [x2, y2], hl, parent) => el("line", { x1, y1, x2, y2, "stroke-width": 14, class: "hit", "data-hl": hl }, parent);
 
   // Text with simple markup: array of [string, style] with style in {"", "it", "sub", "it-sub", "sup"}.
+  // Back on the baseline after a sub- or superscript, a small gap keeps the script clear of the next
+  // character (an italic A otherwise leans over the 1 in u_1 A_1).
+  const SCRIPT_GAP = 0.12;
   function labelPx(x, y, parts, attrs = {}, parent) {
     const t = el("text", { x, y, ...attrs }, parent);
     const fs = +attrs["font-size"] || (attrs.class === "small" ? 14 : 17);
@@ -259,6 +281,7 @@
     for (const [s, style] of parts) {
       const want = (style.includes("sub") ? 0.3 : style === "sup" ? -0.42 : 0) * fs;
       const ts = el("tspan", { dy: (want - shift).toFixed(2) }, t);
+      if (shift !== 0 && want === 0) ts.setAttribute("dx", (SCRIPT_GAP * fs).toFixed(2));   // see SCRIPT_GAP
       if (style.includes("it")) ts.setAttribute("class", "it");
       if (want !== 0) ts.setAttribute("font-size", (0.72 * fs).toFixed(1));
       ts.textContent = s;
@@ -278,9 +301,9 @@
 
   // Rough text metrics for the serif font at size fs.
   const fontSize = attrs => +attrs["font-size"] || (attrs.class === "small" ? 14 : 17);
-  const textWidth = (parts, fs) => parts.reduce((w, [s, st]) => {
-    const f = st.includes("sub") || st === "sup" ? 0.72 * fs : fs;
-    return w + [...s].reduce((a, ch) => a + f * (ch === " " ? 0.27 : /[‖()*.,]/.test(ch) ? 0.34 : /[A-Z∇]/.test(ch) ? 0.68 : 0.5), 0);
+  const textWidth = (parts, fs) => parts.reduce((w, [s, st], n) => {
+    const scr = p => p && (p[1].includes("sub") || p[1] === "sup"), f = scr([s, st]) ? 0.72 * fs : fs;
+    return w + (scr(parts[n - 1]) && !scr([s, st]) ? SCRIPT_GAP * fs : 0) + [...s].reduce((a, ch) => a + f * (ch === " " ? 0.27 : /[‖()*.,]/.test(ch) ? 0.34 : /[A-Z∇]/.test(ch) ? 0.68 : 0.5), 0);
   }, 0);
   // Box of a label centred at (cx, cy) in px.
   const boxAt = (cx, cy, L) => [cx - L.w / 2, cy - L.h / 2, cx + L.w / 2, cy + L.h / 2];
@@ -361,17 +384,20 @@
     const fs = fontSize(attrs);
     const hasSub = parts.some(([, st]) => st.includes("sub")), hasSup = parts.some(([, st]) => st === "sup");
     const L = { parts, attrs, fs, w: textWidth(parts, fs), h: fs * (0.95 + (hasSub ? 0.2 : 0) + (hasSup ? 0.15 : 0)) };
-    L.cands = cands(L); L.accept = accept; L.maxCost = maxCost;
+    // Unless all labels are shown, labels mostly show on hover, so an optional one is placed if it can be.
+    L.cands = cands(L); L.accept = accept; L.maxCost = allShown ? maxCost : Infinity;
     scene.queue.push(L);
   }
   // Stickiness: each label remembers the candidate slot it used last time and keeps it unless another
   // slot is better by more than STICK (so labels don't jump around while something is being dragged).
   // An optional label that was shown stays shown until its cost exceeds twice its maxCost.
   const STICK = 80, lastSlot = new Map();
+  let labelEls = [], allShown = false;          // labels placed in the last render; see "Labels" below
   function placeLabels(parent) {
+    labelEls = [];
     const used = new Map();
     for (const L of scene.queue) {
-      const key = L.parts.map(p => p[0]).join("");
+      const key = L.attrs["data-lab"] ?? L.parts.map(p => p[0]).join("");
       let best = null;
       const at = L.cands.map(([cx, cy, pref], n) => {
         const b = boxAt(cx, cy, L);
@@ -386,13 +412,14 @@
       used.set(key, { n: best.n });
       scene.boxes.push(best.b);
       // Baseline so that the box is vertically centred on the text.
-      labelPx(best.cx, best.cy + 0.33 * L.fs, L.parts, { ...L.attrs, "text-anchor": "middle" }, parent);
+      const t = labelPx(best.cx, best.cy + 0.33 * L.fs, L.parts, { ...L.attrs, "text-anchor": "middle" }, parent);
+      if (L.attrs["data-lab"]) labelEls.push(t);
     }
     used.forEach((v, k) => lastSlot.set(k, v));   // labels not drawn this time keep their last slot
     scene.segs = []; scene.dots = []; scene.boxes = []; scene.queue = [];
   }
 
-  function arrow(p, q, color, parent, { width = 2.6, head = 12, dash } = {}) {
+  function arrow(p, q, color, parent, { width = 2.6, head = 12, dash, hl } = {}) {
     const [x1, y1] = px(p), [x2, y2] = px(q);
     const L = Math.hypot(x2 - x1, y2 - y1);
     if (L < 1) return;
@@ -404,6 +431,7 @@
     if (dash) line.setAttribute("stroke-dasharray", dash);
     const tri = el("polygon", { points: `${x2},${y2} ${bx - uy * w},${by + ux * w} ${bx + uy * w},${by - ux * w}` }, parent);
     tri.style.fill = `var(${color})`;
+    if (hl) el("line", { x1, y1, x2, y2, "stroke-width": 14, class: "hit", "data-hl": hl }, parent);
   }
 
   // Sutherland–Hodgman clip of a convex polygon against a^T x <= b.
@@ -523,6 +551,7 @@
     const [ox, oy] = px([0, 0]);
     el("line", { x1: 0, y1: oy, x2: W, y2: oy, "stroke-width": 1.2 }, stat).style.stroke = "var(--axis)";
     el("line", { x1: ox, y1: 0, x2: ox, y2: H, "stroke-width": 1.2 }, stat).style.stroke = "var(--axis)";
+    hitLine([0, oy], [W, oy], "ax1", stat); hitLine([ox, 0], [ox, H], "ax2", stat);
   }
 
   // Regions and constraint lines depend on which constraints are relaxed; redrawn in render().
@@ -554,7 +583,9 @@
 
   // ---------------------------------------------------------------- dynamic layer
   const dyn = el("g", { "clip-path": "url(#view)" });
-  const boxes = [1, 2].map(i => document.getElementById("relax" + i));
+  // Relaxation state (checked = relaxed), shown as "Relax" checkboxes beside the constraint rows of the
+  // system at the top.
+  const boxes = [{ checked: false }, { checked: false }];
   const sliders = [1, 2].map(i => document.getElementById("u" + i));
   const uvals = [1, 2].map(i => document.getElementById("uval" + i));
   const rows = [1, 2].map(i => document.getElementById("row" + i));
@@ -586,12 +617,11 @@
   const NCOL = ["--n1", "--n2"];
   const fmt = v => (Math.abs(v) < 5e-3 ? 0 : v).toFixed(2);
   const consHtml = i => `<i>A</i><sub>${i + 1}</sub><sup>T</sup><i>x</i> ≤ <i>b</i><sub>${i + 1}</sub>`;
-  // A_j^T x* - b_j, as HTML (pt = "x*" or e.g. "v") and as SVG label parts.
-  const slackHtml = (j, pt = "x*") =>
-    `<i>A</i><sub>${j}</sub><sup>T</sup><i>${pt.replace("*", "</i>*<i>")}</i> − <i>b</i><sub>${j}</sub>`.replace("<i></i>", "");
+  // A_j^T x - b_j as HTML for the point ptHtml (e.g. x*(u)), and A_j^T x* - b_j as SVG label parts.
+  const slackHtml = (j, ptHtml) => `<i>A</i><sub>${j}</sub><sup>T</sup>${ptHtml} − <i>b</i><sub>${j}</sub>`;
   const slack = j => [["A", "it"], [j, "sub"], ["T", "sup"], ["x", "it"], ["*", "sup"], [" − ", ""], ["b", "it"], [j, "sub"]];
-  // Three-column layout:  lhs | min / s. t. | expression
-  const fRow = (lhs, op, expr) => `<span>${lhs}</span><span class="op">${op}</span><span>${expr}</span>`;
+  // Four-column layout:  lhs | min / s. t. | expression | relax-checkbox (constraint rows only)
+  const fRow = (lhs, op, expr, extra = "") => `<span>${lhs}</span><span class="op">${op}</span><span>${expr}</span><span>${extra}</span>`;
   let showDual = true;
 
   function render() {
@@ -648,8 +678,10 @@
     const obj = "<i>c</i><sup>T</sup><i>x</i>" + [0, 1].map(i =>
       ` <span class="n${i + 1}${inact(R.includes(i))}">+ <i>u</i><sub>${i + 1}</sub>(<i>A</i><sub>${i + 1}</sub><sup>T</sup><i>x</i> − <i>b</i><sub>${i + 1}</sub>)</span>`).join("");
     const stRows = [...[0, 1].map(i => `<span class="n${i + 1}${inact(K.includes(i))}">${consHtml(i)}</span>`), "<i>x</i> ∈ <i>X</i><sub>LP</sub>"];
+    const relaxBox = i => `<label class="relax"><input type="checkbox" class="relax${i + 1}" data-i="${i}"` +
+      `${R.includes(i) ? " checked" : ""}> Relax</label>`;
     formula.innerHTML = `<div class="f">${fRow(lhs, "min", obj)}` +
-      stRows.map((r, n) => fRow("", n === 0 ? "s. t." : "", r)).join("") + "</div>";
+      stRows.map((r, n) => fRow("", n === 0 ? "s. t." : "", r, n < 2 ? relaxBox(n) : "")).join("") + "</div>";
 
     // Penalised objective and the optimal extreme point of the subproblem.
     let cu = C.slice();
@@ -731,6 +763,7 @@
     }
     const d = el("polygon", { points: pts(domain), "stroke-width": 2, "stroke-linejoin": "round" }, regions);
     d.style.fill = "var(--feas-fill)"; d.style.stroke = "var(--xlp-stroke)";
+    XLP.forEach((v, n) => hitLine(px(v), px(XLP[(n + 1) % XLP.length]), "X_LP", regions));   // its outline shows its label
     [XLP, ...(K.length ? [domain] : [])].forEach(poly => poly.forEach((v, n) => obSeg(v, poly[(n + 1) % poly.length], 0.5)));
     { const V = viewRect(); obSeg([V.xmin, 0], [V.xmax, 0], 0.3); obSeg([0, V.ymin], [0, V.ymax], 0.3); }
     // Relaxed constraints dashed, kept ones solid.
@@ -740,6 +773,7 @@
       ln.style.stroke = "var(--cons)";
       if (R.includes(i)) ln.setAttribute("stroke-dasharray", "8 5");
       ln.setAttribute("stroke-width", R.includes(i) ? 1.6 : 2.2);
+      hitLine(px(p), px(q), "k" + (i + 1), regions);
       obSeg(p, q, 0.8);
     });
 
@@ -762,8 +796,8 @@
 
     // Fixed labels: axes, then the optimum markers and constraint labels get first pick.
     const V = viewRect();
-    want([["x", "it"], ["1", "sub"]], { class: "small" }, fixedAt([V.xmax - 9 / S, -26 / S], "end"));
-    want([["x", "it"], ["2", "sub"]], { class: "small" }, fixedAt([7 / S, V.ymax - 20 / S]));
+    want([["x", "it"], ["1", "sub"]], { class: "small", "data-lab": "ax1" }, fixedAt([V.xmax - 9 / S, -26 / S], "end"));
+    want([["x", "it"], ["2", "sub"]], { class: "small", "data-lab": "ax2" }, fixedAt([7 / S, V.ymax - 20 / S]));
 
     const boxLabels = [];   // queued after the main labels
     // u_i (A_i^T x* - b_i) as rectangles: dotted side = distance (A_i^T x* - b_i)/||A_i|| from x* to line i,
@@ -780,22 +814,23 @@
       if (w > 1e-9) {
         const rect = [xs, F, add(F, scale(w, t)), add(xs, scale(w, t))];
         const r = el("polygon", { points: pts(rect), "fill-opacity": 0.2, "stroke-width": 1 }, dyn);
-        r.style.fill = col; r.style.stroke = col;
+        r.style.fill = col; r.style.stroke = col; r.setAttribute("data-hl", "area" + j);
         obSeg(rect[1], rect[2], 0.6); obSeg(rect[3], rect[0], 0.6);
         // The two sides as long as the penalty arrow u_i A_i, in that arrow's colour.
         [xs, F].forEach(p0 => {
           const [x1, y1] = px(p0), [x2, y2] = px(add(p0, scale(w, t)));
           el("line", { x1, y1, x2, y2, "stroke-width": 2.6, "stroke-linecap": "round" }, dyn).style.stroke = `var(${NCOL[i]})`;
+          hitLine([x1, y1], [x2, y2], "side" + j, dyn);
           obSeg(p0, add(p0, scale(w, t)), 1.5);
         });
         // Label the side lying on the constraint line (length u_i ||A_i||), preferably outside the box.
         if (w > 0.3) {
-          boxLabels.push(() => want([["u", "it"], [j, "it-sub"], [" ‖", ""], ["A", "it"], [j, "sub"], ["‖", ""]], { class: "small" },
+          boxLabels.push(() => want([["u", "it"], [j, "it-sub"], [" ‖", ""], ["A", "it"], [j, "sub"], ["‖", ""]], { class: "small", "data-lab": "side" + j },
             L => beside(F, add(F, scale(w, t)), 4, L, [0.5, 0.3, 0.7, 0.15, 0.85], sdir(scale(-dist, k.e)))));
         }
         // The area, inside the box if it fits.
         const rpx = rect.map(px);
-        boxLabels.push(() => want([["u", "it"], [j, "it-sub"], ["(", ""], ...slack(j), [")", ""]], { class: "small" },
+        boxLabels.push(() => want([["u", "it"], [j, "it-sub"], ["(", ""], ...slack(j), [")", ""]], { class: "small", "data-lab": "area" + j },
           () => [0.5, 0.35, 0.65, 0.2, 0.8, 0.1, 0.9].map(f => {
             // along the box's midline, so that part of a box running off the view still works
             const m0 = scale(0.5, add(rpx[0], rpx[1])), m1 = scale(0.5, add(rpx[3], rpx[2]));
@@ -806,32 +841,33 @@
       const [x1, y1] = px(xs), [x2, y2] = px(F);
       const seg = el("line", { x1, y1, x2, y2, "stroke-width": 2.2, "stroke-dasharray": "1 5", "stroke-linecap": "round" }, dyn);
       seg.style.stroke = col;
+      hitLine([x1, y1], [x2, y2], "dist" + j, dyn);
       obSeg(xs, F, 1.5);
-      boxLabels.push(() => want([["(", ""], ...slack(j), [") / ‖", ""], ["A", "it"], [j, "sub"], ["‖", ""]], { class: "small" },
+      boxLabels.push(() => want([["(", ""], ...slack(j), [") / ‖", ""], ["A", "it"], [j, "sub"], ["‖", ""]], { class: "small", "data-lab": "dist" + j },
         L => beside(xs, F, 4, L, [0.5, 0.35, 0.65, 0.2, 0.8], sdir(scale(-1, t)))));
     });
 
     // Scaled normals u_i A_i of the relaxed constraints.
     (vecsOn ? R : []).forEach(i => {
       const k = CONS[i];
-      arrow(k.foot, add(k.foot, scale(u[i], k.a)), NCOL[i], dyn);
+      arrow(k.foot, add(k.foot, scale(u[i], k.a)), NCOL[i], dyn, { hl: "n" + (i + 1) });
       obSeg(k.foot, add(k.foot, scale(u[i], k.a)), 2.5);
       const [fx, fy] = px(k.foot);
-      el("circle", { cx: fx, cy: fy, r: 3 }, dyn).style.fill = `var(${NCOL[i]})`;
+      el("circle", { cx: fx, cy: fy, r: 3, "data-hl": "n" + (i + 1) }, dyn).style.fill = `var(${NCOL[i]})`;
       obDot(k.foot, 4, 30);
     });
 
     // c, then u_i A_i for each relaxed i appended head to tail (penalty vectors, optional), then the resultant.
     const O = [0, 0];
     let tip = add(O, C);
-    arrow(O, tip, "--c", dyn, { width: 3 });
+    arrow(O, tip, "--c", dyn, { width: 3, hl: "c" });
     obSeg(O, tip, 2.5);
     R.forEach(i => {
       const v = scale(u[i], CONS[i].a);
-      if (vecsOn) { arrow(tip, add(tip, v), NCOL[i], dyn, { width: 2, dash: "6 4" }); obSeg(tip, add(tip, v), 2); }
+      if (vecsOn) { arrow(tip, add(tip, v), NCOL[i], dyn, { width: 2, dash: "6 4", hl: "n" + (i + 1) }); obSeg(tip, add(tip, v), 2); }
       tip = add(tip, v);
     });
-    if (anyU) { arrow(O, tip, "--res", dyn, { width: 3 }); obSeg(O, tip, 2.5); }
+    if (anyU) { arrow(O, tip, "--res", dyn, { width: 3, hl: "res" }); obSeg(O, tip, 2.5); }
     const [cox, coy] = px(O);
     el("circle", { cx: cox, cy: coy, r: 3 }, dyn).style.fill = "var(--fg)";
     obDot(O, 4, 30);
@@ -843,6 +879,7 @@
       const ll = el("line", { x1: px(p)[0], y1: px(p)[1], x2: px(q)[0], y2: px(q)[1],
                               "stroke-width": 1.6, "stroke-dasharray": "7 5" }, dyn);
       ll.style.stroke = anyU ? "var(--res)" : "var(--c)";
+      hitLine(px(p), px(q), anyU ? "res" : "c", dyn);
       obSeg(p, q, 0.8);
     }
     // Optimum of the unrelaxed problem, x*_LP: a hollow five-pointed star.
@@ -852,7 +889,7 @@
       return `${(lx + r * Math.cos(a)).toFixed(2)},${(ly + r * Math.sin(a)).toFixed(2)}`;
     }).join(" ");
     const dm = el("polygon", { points: star, "stroke-width": 2, "stroke-linejoin": "round" }, dyn);
-    dm.style.fill = "var(--halo)"; dm.style.stroke = "var(--opt)";
+    dm.style.fill = "var(--halo)"; dm.style.stroke = "var(--opt)"; dm.setAttribute("data-hl", "xlp");
     obDot(xLP, 11, 80);
 
     const [sx, sy] = px(xs);
@@ -860,54 +897,59 @@
     const pt = el("circle", { cx: sx, cy: sy, r: 6 }, dyn); pt.style.fill = "var(--opt)";
     // Draggable (several optimal points): a contrasting dot inside, in the background colour.
     if (tieShape) el("circle", { cx: sx, cy: sy, r: 2.4 }, dyn).style.fill = "var(--halo)";
+    const atLP = Math.hypot(xs[0] - xLP[0], xs[1] - xLP[1]) <= 1e-6;   // then only x*_LP is labelled
+    el("circle", { cx: sx, cy: sy, r: 12, class: "hitarea", "data-hl": (atLP ? "xlp" : "xs") + " hover-xs" }, dyn);
     obDot(xs, 9, 80);
 
     // Labels, most important first; each takes the free-est of its candidate spots.
     // x*(u) prefers the side away from X_LP's centre (and is omitted when it coincides with x*_LP).
-    if (Math.hypot(xs[0] - xLP[0], xs[1] - xLP[1]) > 1e-6) {
-      want([["x", "it"], ["*", "sup"], ["(", ""], ["u", "it"], [")", ""]], { "font-weight": "bold" },
+    if (!atLP) {
+      want([["x", "it"], ["*", "sup"], ["(", ""], ["u", "it"], [")", ""]], { "font-weight": "bold", "data-lab": "xs" },
            L => around(xs, 9, L, sdir([xs[0] - cen[0], xs[1] - cen[1]])));
     }
-    want([["x", "it"], ["*", "sup"], ["LP", "sub"]], { "font-weight": "bold" }, L => around(xLP, 10, L, sdir(XLP_OPT_LABEL)));
+    want([["x", "it"], ["*", "sup"], ["LP", "sub"]], { "font-weight": "bold", "data-lab": "xlp" }, L => around(xLP, 10, L, sdir(XLP_OPT_LABEL)));
     CONS.forEach((k, i) => {
       const j = String(i + 1);
       // Fixed spot (labels of fixed objects don't move); the text's outline keeps it legible over lines.
-      want([["A", "it"], [j, "sub"], ["T", "sup"], ["x", "it"], [" ≤ ", ""], ["b", "it"], [j, "sub"]], {},
+      want([["A", "it"], [j, "sub"], ["T", "sup"], ["x", "it"], [" ≤ ", ""], ["b", "it"], [j, "sub"]], { "data-lab": "k" + j },
            fixedAt(k.labelAt, k.anchor));
     });
-    want([["X", "it"], ["LP", "sub"]], { "font-size": 22 }, () => [px(XLP_LABEL)]);
-    want([["c", "it"]], {}, L => beside(O, C, 4, L));
+    want([["X", "it"], ["LP", "sub"]], { "font-size": 22, "data-lab": "X_LP" }, () => [px(XLP_LABEL)]);
+    want([["c", "it"]], { "data-lab": "c" }, L => beside(O, C, 4, L));
     if (Math.hypot(cu[0] - C[0], cu[1] - C[1]) > 0.08) {
-      want([["c", "it"], ...R.flatMap(i => [[" + ", ""], ["u", "it"], [String(i + 1), "it-sub"], ["A", "it"], [String(i + 1), "sub"]])], {},
+      want([["c", "it"], ...R.flatMap(i => [[" + ", ""], ["u", "it"], [String(i + 1), "it-sub"], ["A", "it"], [String(i + 1), "sub"]])], { "data-lab": "res" },
            L => beside(O, tip, 5, L));
     }
     // Normal labels: past the arrow tip, else beside the arrow.
     R.filter(i => vecsOn && u[i] * CONS[i].n > 0.08).forEach(i => {
       const k = CONS[i], tipN = add(k.foot, scale(u[i], k.a));
-      want([["u", "it"], [String(i + 1), "it-sub"], [" A", "it"], [String(i + 1), "sub"]], { class: "small" },
+      want([["u", "it"], [String(i + 1), "it-sub"], [" A", "it"], [String(i + 1), "sub"]], { class: "small", "data-lab": "n" + (i + 1) },
            L => [...around(tipN, 5, L, sdir(k.a), 5), ...beside(k.foot, tipN, 4, L).map((c, n) => [...c, 15 + 3 * n])]);
     });
     boxLabels.forEach(f => f());
+    // Coordinates of x*(u): only while hovering the point (queued last, so they never push other labels).
+    want([["(", ""], [fmt(xs[0]), ""], [", ", ""], [fmt(xs[1]), ""], [")", ""]], { class: "small", "data-lab": "hover-xs" },
+         L => around(xs, 9, L, sdir([xs[0] - cen[0], xs[1] - cen[1]])));
     placeLabels(dyn);
+    applyHover();
 
-    // Readout: x*(u) and h_LP(u) = c^T x* + sum u_i (A_i^T x* - b_i), term by term.
-    // x*(u) on its own line; then the terms of h_LP(u) with their values underneath, summed on that row.
-    // Prices in their arrows' colours; A_i^T x* - b_i green if x* satisfies constraint i, red if not.
-    const xsHtml = R.length ? "<i>x</i>*(<i>u</i>)" : "<i>x</i>*";
-    const line1 = `<div>${xsHtml} = <b>(${fmt(xs[0])}, ${fmt(xs[1])})</b></div>`;
+    // Readout: h_LP(u) = c^T x*(u) + sum u_i (A_i^T x*(u) - b_i), term by term, with the values underneath,
+    // summed on that row (z_LP = c^T x*_LP with nothing relaxed). The coordinates of x*(u) show on hover.
+    // Prices in their arrows' colours; A_i^T x*(u) - b_i green if x*(u) satisfies constraint i, red if not.
+    const xsHtml = R.length ? "<i>x</i>*(<i>u</i>)" : "<i>x</i>*<sub>LP</sub>";
     const cls = i => (xd[i] <= 1e-9 ? "ok" : "bad");
-    const top = [R.length ? "<i>h</i><sub>LP</sub>(<i>u</i>) =" : "<i>z</i><sub>LP</sub> =", "<i>c</i><sup>T</sup><i>x</i>*"];
+    const top = [R.length ? "<i>h</i><sub>LP</sub>(<i>u</i>) =" : "<i>z</i><sub>LP</sub> =", `<i>c</i><sup>T</sup>${xsHtml}`];
     const bot = ["", `<b>${fmt(xc)}</b>`];
-    // Each penalty term as  u_i · (A_i^T x* - b_i), one column per factor so the values line up.
+    // Each penalty term as  u_i · (A_i^T x*(u) - b_i), one column per factor so the values line up.
     R.forEach(i => {
       const v = xd[i], vs = fmt(v);
-      top.push("+", `<span class="n${i + 1}"><i>u</i><sub>${i + 1}</sub></span>`, "·", `<span class="${cls(i)}">(${slackHtml(i + 1)})</span>`);
+      top.push("+", `<span class="n${i + 1}"><i>u</i><sub>${i + 1}</sub></span>`, "·", `<span class="${cls(i)}">(${slackHtml(i + 1, xsHtml)})</span>`);
       bot.push("+", `<span class="n${i + 1}">${fmt(u[i])}</span>`, "·", `<span class="${cls(i)}">${v < -5e-3 ? `(${vs})` : vs}</span>`);
     });
     top.push(""); bot.push(`= <b>${fmt(h)}</b>`);
     const sum = `<div class="sum" style="grid-template-columns: repeat(${top.length}, auto)">` +
       [...top, ...bot].map(c => `<span>${c}</span>`).join("") + "</div>";
-    readout.innerHTML = line1 + sum;
+    readout.innerHTML = sum;
 
     renderDual(R, P, u, best, h);
   }
@@ -1299,6 +1341,48 @@
   const optSide = document.getElementById("optSide"), page = document.getElementById("page");
   const applySide = () => page.classList.toggle("side", optSide.checked);
   optSide.addEventListener("change", applySide);
+  // Labels: each label (data-lab) shows while the pointer is over an object with its key in data-hl, or
+  // when pinned. Clicking an object pins its labels, clicking a shown label unpins it. "Show all labels" /
+  // "Hide all labels" set the default for every label and forget the pins. The coordinates of x*(u)
+  // (key "hover-xs") only show on hover or when pinned.
+  let hoverKeys = [];
+  const pinned = new Map();                                // key -> shown, overriding allShown
+  const shownKey = k => pinned.has(k) ? pinned.get(k) : allShown && !k.startsWith("hover-");
+  function applyHover() {
+    labelEls.forEach(t => {
+      const k = t.getAttribute("data-lab");
+      t.classList.toggle("show", hoverKeys.includes(k) || shownKey(k));
+    });
+  }
+  const setAll = on => { allShown = on; pinned.clear(); render(); };
+  document.getElementById("showLabels").addEventListener("click", () => setAll(true));
+  document.getElementById("hideLabels").addEventListener("click", () => setAll(false));
+  if (params.get("labels") === "1") allShown = true;
+  svg.addEventListener("pointerover", e => {
+    if (tieDrag) return;                                   // keep x*(u)'s label while it is dragged
+    if (e.target.closest && e.target.closest("text[data-lab]")) return;   // over a shown label: as before
+    const t = e.target.closest && e.target.closest("[data-hl]");
+    hoverKeys = t ? t.getAttribute("data-hl").split(" ") : [];
+    applyHover();
+  });
+  svg.addEventListener("pointerleave", () => { if (!tieDrag) { hoverKeys = []; applyHover(); } });
+  // A click (not the end of a drag of x*(u)) pins the labels of an object, or unpins a label.
+  let downAt = null;
+  svg.addEventListener("pointerdown", e => { downAt = [e.clientX, e.clientY]; });
+  svg.addEventListener("click", e => {
+    if (downAt && Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 4) return;
+    const lab = e.target.closest && e.target.closest("text[data-lab]");
+    if (lab) {
+      const k = lab.getAttribute("data-lab");
+      pinned.set(k, false);
+      hoverKeys = hoverKeys.filter(h => h !== k);          // hide it now, though its object may be under it
+    } else {
+      const t = e.target.closest && e.target.closest("[data-hl]");
+      if (!t) return;
+      t.getAttribute("data-hl").split(" ").forEach(k => pinned.set(k, true));
+    }
+    applyHover();
+  });
   if (params.get("side") === "1") optSide.checked = true;
   applySide();
   // Dragging x*(u) in the figure (only when several points are optimal).
@@ -1319,7 +1403,13 @@
   ["pointerup", "pointercancel"].forEach(t => svg.addEventListener(t, () => { tieDrag = false; }));
   // A tick sets an exact value (step "any"); the slider snaps to 0.01 again as soon as it is touched.
   sliders.forEach(s => ["pointerdown", "keydown"].forEach(t => s.addEventListener(t, () => { s.step = "0.01"; })));
-  boxes.forEach(b => b.addEventListener("change", render));
+  formula.addEventListener("change", e => {                         // the relax-checkboxes in the system
+    const i = e.target.dataset && e.target.dataset.i;
+    if (i === undefined) return;
+    boxes[+i].checked = e.target.checked;
+    if (e.target.checked) { sliders[+i].step = "0.01"; sliders[+i].value = "0"; }   // a newly relaxed constraint starts at u_i = 0
+    render();
+  });
   // Light/dark theme: ?theme= wins, then the viewer's last choice (this browser only), else light.
   const themeBtn = document.getElementById("themeBtn");
   const setTheme = (t, save) => {
