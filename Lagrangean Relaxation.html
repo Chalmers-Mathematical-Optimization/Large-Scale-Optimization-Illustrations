@@ -30,7 +30,7 @@
   Embed with e.g.  <iframe src="lagrangean-relaxation.html?u1=0.8&u2=0.5" width="760" height="1100"></iframe>
   Optional URL parameters: u1, u2 (initial prices; u sets both), relax=12 | 1 | 2 | none
   (default: none, or the constraints whose price is given),
-  dual=0 (hide the dual-function panel), side=1 (dual-function panel beside the figure), map=3d | vertex | value (3-D graph, the default; or a 2-D map coloured by optimal extreme point or by the value of h_LP).
+  dual=0 (hide the dual-function panel), theme=dark (default light), side=1 (dual-function panel beside the figure), map=3d | vertex | value (3-D graph, the default; or a 2-D map coloured by optimal extreme point or by the value of h_LP).
   Geometry is set in the CONFIG block in the script below.
 -->
 <style>
@@ -56,14 +56,7 @@
     --v0: #e0a030; --v1: #3fa0b0; --v2: #8fb33a; --v3: #c06aa8;
     --v4: #9c755f; --v5: #5b8ad6; --v6: #e07a50; --v7: #7a7a86;
   }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --bg: #17171b; --fg: #ececf1; --muted: #a0a0ab; --grid: #26262c; --axis: #5c5c66;
-      --xlp-fill: #1f2a3d; --xlp-stroke: #7d9bd1; --feas-fill: #2f4466; --cons: #b5b5bf;
-      --c: #6fa4ff; --n1: #f39a4a; --n2: #b48cf0; --res: #ff6688; --pos: #4fcb87; --neg: #ff6b6b;
-      --opt: #ffffff; --halo: #17171b;
-    }
-  }
+  /* Light by default (to sit well inside e.g. Canvas); dark via the toggle button or ?theme=dark. */
   :root[data-theme="dark"] {
     --bg: #17171b; --fg: #ececf1; --muted: #a0a0ab; --grid: #26262c; --axis: #5c5c66;
     --xlp-fill: #1f2a3d; --xlp-stroke: #7d9bd1; --feas-fill: #2f4466; --cons: #b5b5bf;
@@ -72,7 +65,13 @@
   }
   html, body { margin: 0; background: var(--bg); color: var(--fg); }
   body { font-family: "Latin Modern Roman", "CMU Serif", "Cambria", Georgia, serif; }
-  .wrap { max-width: 760px; margin: 0 auto; padding: 12px 16px; box-sizing: border-box; }
+  .wrap { position: relative; max-width: 760px; margin: 0 auto; padding: 12px 16px; box-sizing: border-box; }
+  /* Top-right corner: link to the standalone page, and the theme toggle */
+  .corner { position: absolute; top: 8px; right: 12px; z-index: 1; display: flex; gap: 6px; }
+  .cbtn { box-sizing: border-box; width: 30px; height: 30px; padding: 0; display: inline-flex; align-items: center;
+          justify-content: center; border: 1px solid var(--grid); border-radius: 6px; background: var(--bg);
+          color: var(--muted); font: inherit; font-size: 16px; line-height: 1; text-decoration: none; cursor: pointer; }
+  .cbtn:hover { color: var(--fg); border-color: var(--axis); }
   /* Room for the tallest form (nothing relaxed: objective + 2 constraints + x ∈ X_LP = 4 rows), so the page doesn't jump */
   .formula { display: flex; justify-content: center; align-items: flex-start; font-size: 1.05rem; margin: 4px 0 8px; line-height: 1.6; min-height: calc(4 * 1.6em); }
   .formula .f { display: grid; grid-template-columns: auto auto auto; column-gap: 0.6em; align-items: baseline; }
@@ -138,6 +137,11 @@
 </head>
 <body>
 <div class="wrap" id="page">
+  <div class="corner">
+    <a class="cbtn" target="_blank" rel="noopener" title="Open in a new tab (GitHub Pages)" aria-label="Open in a new tab (GitHub Pages)"
+       href="https://chalmers-mathematical-optimization.github.io/Large-Scale-Optimization-Illustrations/Lagrangean%20Relaxation.html">↗</a>
+    <button type="button" class="cbtn" id="themeBtn"></button>
+  </div>
   <div class="formula" id="formula"></div>
   <svg id="fig" viewBox="0 0 720 600" role="img" aria-label="Polyhedron X_LP cut by two constraints, with the objective vector, the scaled constraint normals and the resulting Lagrangean objective direction."></svg>
   <details class="options">
@@ -1316,10 +1320,24 @@
   // A tick sets an exact value (step "any"); the slider snaps to 0.01 again as soon as it is touched.
   sliders.forEach(s => ["pointerdown", "keydown"].forEach(t => s.addEventListener(t, () => { s.step = "0.01"; })));
   boxes.forEach(b => b.addEventListener("change", render));
-  if (window.matchMedia) {
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    if (mq.addEventListener) mq.addEventListener("change", render);    // recolour the dual map
+  // Light/dark theme: ?theme= wins, then the viewer's last choice (this browser only), else light.
+  const themeBtn = document.getElementById("themeBtn");
+  const setTheme = (t, save) => {
+    document.documentElement.setAttribute("data-theme", t);
+    themeBtn.textContent = t === "dark" ? "☀" : "☾";
+    themeBtn.title = t === "dark" ? "Switch to light theme" : "Switch to dark theme";
+    themeBtn.setAttribute("aria-label", themeBtn.title);
+    if (save) { try { localStorage.setItem("lagrangean-theme", t); } catch (e) { /* storage unavailable */ } }
+  };
+  let theme = params.get("theme");
+  if (theme !== "dark" && theme !== "light") {
+    try { theme = localStorage.getItem("lagrangean-theme"); } catch (e) { theme = null; }
   }
+  setTheme(theme === "dark" ? "dark" : "light", false);
+  themeBtn.addEventListener("click", () => {
+    setTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark", true);
+    render();                                                      // the dual map/3D colours are computed
+  });
   render();
 })();
 </script>
