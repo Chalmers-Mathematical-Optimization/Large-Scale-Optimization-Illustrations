@@ -32,7 +32,8 @@
   Optional URL parameters: lp=1 | 2 (which LP, as in the dropdown at the top; default 1), u1, u2 (initial prices; u sets both), relax=12 | 1 | 2 | none
   (default: none, or the constraints whose price is given),
   dual=0 (hide the dual-function panel), labels=1 (start with all of the figure's labels shown;
-  by default a label appears while hovering over its object), theme=dark (default light), layout=auto | vertical | horizontal (dual-function panel below the figure,
+  by default a label appears while hovering over its object), theme=auto | light | dark (as in the Theme dropdown; auto, the default, follows the system setting;
+  e.g. theme=light to force light mode inside Canvas), layout=auto | vertical | horizontal (dual-function panel below the figure,
   or beside it; auto, the default, puts it beside the figure when the window is wide enough; side=1 is
   an alias for horizontal), map=3d | vertex | value (3-D graph, the default; or a 2-D map coloured by optimal extreme point or by the value of h_LP).
   Geometry is set in the CONFIG block in the script below.
@@ -61,7 +62,7 @@
     --v0: #e0a030; --v1: #3fa0b0; --v2: #8fb33a; --v3: #c06aa8;
     --v4: #9c755f; --v5: #5b8ad6; --v6: #e07a50; --v7: #7a7a86;
   }
-  /* Light by default (to sit well inside e.g. Canvas); dark via the toggle button or ?theme=dark. */
+  /* data-theme is set by the script: the Theme dropdown, or ?theme=; Auto follows prefers-color-scheme. */
   :root[data-theme="dark"] {
     --bg: #17171b; --fg: #ececf1; --muted: #a0a0ab; --grid: #26262c; --axis: #5c5c66;
     --xlp-fill: #1f2a3d; --xlp-stroke: #7d9bd1; --feas-fill: #2f4466; --cons: #b5b5bf;
@@ -78,14 +79,14 @@
   .formula, .uval, .controls label[for], svg text, .wrap i, .wrap sub, .wrap sup { font-family: var(--math-font); }
   .formula label.relax { font-family: var(--text-font); font-size: 0.9em; }
   .wrap { position: relative; max-width: 760px; margin: 0 auto; padding: 12px 16px; box-sizing: border-box; }
-  /* Top-right corner: link to the standalone page, and the theme toggle */
+  /* Top-right corner: link to the standalone page */
   .corner { position: absolute; top: 8px; right: 12px; z-index: 1; display: flex; gap: 6px; }
   .cbtn { box-sizing: border-box; width: 30px; height: 30px; padding: 0; display: inline-flex; align-items: center;
           justify-content: center; border: 1px solid var(--grid); border-radius: 6px; background: var(--bg);
           color: var(--muted); font: inherit; font-size: 16px; line-height: 1; text-decoration: none; cursor: pointer; }
   .cbtn:hover { color: var(--fg); border-color: var(--axis); }
   /* Choice of LP, top left (clear of the corner buttons) */
-  .lpchoice { margin: 2px 76px 4px 0; font-size: 0.95rem; color: var(--muted); }
+  .lpchoice { margin: 2px 40px 4px 0; font-size: 0.95rem; color: var(--muted); }
   .lpchoice select { max-width: 100%; padding: 3px 6px; border: 1px solid var(--grid); border-radius: 6px;
                      background: var(--bg); color: var(--fg); font: inherit; cursor: pointer; }
   .lpchoice select:hover { border-color: var(--axis); }
@@ -204,7 +205,6 @@
   <div class="corner">
     <a class="cbtn" target="_blank" rel="noopener" title="Open in a new tab (GitHub Pages)" aria-label="Open in a new tab (GitHub Pages)"
        href="https://chalmers-mathematical-optimization.github.io/Large-Scale-Optimization-Illustrations/Lagrangean%20Relaxation.html">↗</a>
-    <button type="button" class="cbtn" id="themeBtn"></button>
   </div>
   <div class="top">
   <div class="lpchoice"><label>LP: <select id="lpSelect"></select></label></div>
@@ -228,6 +228,11 @@
       <option value="auto">Auto</option>
       <option value="vertical">Vertical</option>
       <option value="horizontal">Horizontal</option>
+    </select></label>
+    <label>Theme <select id="optTheme">
+      <option value="auto">Auto</option>
+      <option value="light">Light</option>
+      <option value="dark">Dark</option>
     </select></label>
     <div class="btns">
       <button type="button" id="showLabels">Show all labels</button>
@@ -285,7 +290,8 @@
       ],
     },
     {
-      // x*_LP is where constraint 1 crosses the top edge of X_LP.
+      // x*_LP is where constraint 1 crosses the top edge of X_LP. -c is outside cone(A_1, A_2), so no u >= 0
+      // has c + u_1 A_1 + u_2 A_2 = 0: the pieces of h_LP (both relaxed) don't all meet in one point.
       name: "Optimum on the boundary of X_LP",
       XLP: [[1, 1], [7, 0.8], [9.2, 3], [8.5, 6.5], [5, 7.6], [1.5, 6]],
       C: [-2, -1.2],
@@ -293,7 +299,7 @@
       XLP_OPT_LABEL: [-0.3, 0.4],
       CONS: [
         { a: [1, 0.25],  b: 8.6, labelAt: [8.7, -1.35], anchor: "end" },
-        { a: [-0.3, 1],  b: 5.5, labelAt: [-2.4, 5.45], anchor: "start" },
+        { a: [-0.5, -1], b: -3.5, labelAt: [-2.4, 5.45], anchor: "start" },
       ],
     },
   ];
@@ -1670,24 +1676,27 @@
     try { history.replaceState(null, "", "?" + q); } catch (e) { /* e.g. sandboxed frame */ }
     render();
   });
-  // Light/dark theme: ?theme= wins, then the viewer's last choice (this browser only), else light.
-  const themeBtn = document.getElementById("themeBtn");
-  const setTheme = (t, save) => {
+  // Theme: ?theme= wins, then the viewer's last choice (this browser only), else Auto, which follows the
+  // system's light/dark setting (and its changes).
+  const optTheme = document.getElementById("optTheme");
+  const darkMQ = window.matchMedia("(prefers-color-scheme: dark)");
+  const applyTheme = () => {
+    const t = optTheme.value === "auto" ? (darkMQ.matches ? "dark" : "light") : optTheme.value;
     document.documentElement.setAttribute("data-theme", t);
-    themeBtn.textContent = t === "dark" ? "☀" : "☾";
-    themeBtn.title = t === "dark" ? "Switch to light theme" : "Switch to dark theme";
-    themeBtn.setAttribute("aria-label", themeBtn.title);
-    if (save) { try { localStorage.setItem("lagrangean-theme", t); } catch (e) { /* storage unavailable */ } }
   };
+  const isTheme = t => ["auto", "light", "dark"].includes(t);
   let theme = params.get("theme");
-  if (theme !== "dark" && theme !== "light") {
+  if (!isTheme(theme)) {
     try { theme = localStorage.getItem("lagrangean-theme"); } catch (e) { theme = null; }
   }
-  setTheme(theme === "dark" ? "dark" : "light", false);
-  themeBtn.addEventListener("click", () => {
-    setTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark", true);
+  optTheme.value = isTheme(theme) ? theme : "auto";
+  applyTheme();
+  optTheme.addEventListener("change", () => {
+    try { localStorage.setItem("lagrangean-theme", optTheme.value); } catch (e) { /* storage unavailable */ }
+    applyTheme();
     render();                                                      // the dual map/3D colours are computed
   });
+  darkMQ.addEventListener("change", () => { if (optTheme.value === "auto") { applyTheme(); render(); } });
   render();
 })();
 </script>
