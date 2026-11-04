@@ -245,6 +245,7 @@
   #subcap { display: grid; }
   #subcap > span { grid-area: 1 / 1; }
   #subcap > .hid { visibility: hidden; }
+  #subfig[hidden], #subcap[hidden] { display: none; }
 </style>
 </head>
 <body>
@@ -358,6 +359,9 @@
       ],
     },
   ];
+  // Subgradient information: the subdifferential plot, the subgradient shading in the h_LP graph (fan or
+  // supporting line/plane at u) and the explanations about subgradients. false hides all of it.
+  const SUBGRADIENTS = false;
   // ------------------------------------------------------------------------
 
   const NS = "http://www.w3.org/2000/svg";
@@ -1227,7 +1231,9 @@
     const in3d = R.length === 2 && mapMode === "3d";
     dsvg.classList.toggle("rotate", in3d);
     (R.length === 1 ? dual1D : in3d ? dual3D : dual2D)(R, P, u, best, h, sub);
-    renderSub(R, P, u, h, sub);
+    [ssvg, scap].forEach(e => e.toggleAttribute("hidden", !SUBGRADIENTS));
+    if (SUBGRADIENTS) renderSub(R, P, u, h, sub);
+    else subDrag = null;
   }
   // Optimal prices (from dualOptima) and setting a slider to a price; picking within a few pixels of an
   // optimum in the dual panel snaps to it exactly (step "any"), so that the kink there can be reached.
@@ -1412,12 +1418,14 @@
       });
 
     // Supporting plane at u with gradient g(x(u)), over a patch around u; it tilts as x(u) is dragged.
-    const patch = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, b]) => {
-      const w = [clamp(u[0] + 0.22 * a * U[0], 0, U[0]), clamp(u[1] + 0.22 * b * U[1], 0, U[1])];
-      return [w[0], w[1], h + sub.g[0] * (w[0] - u[0]) + sub.g[1] * (w[1] - u[1])];
-    });
-    const sp = el("polygon", { points: patch.map(P2).join(" "), "fill-opacity": 0.22, "stroke-width": 1.2, "stroke-linejoin": "round" }, dsvg);
-    sp.style.fill = "var(--fg)"; sp.style.stroke = "var(--fg)";
+    if (SUBGRADIENTS) {
+      const patch = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, b]) => {
+        const w = [clamp(u[0] + 0.22 * a * U[0], 0, U[0]), clamp(u[1] + 0.22 * b * U[1], 0, U[1])];
+        return [w[0], w[1], h + sub.g[0] * (w[0] - u[0]) + sub.g[1] * (w[1] - u[1])];
+      });
+      const sp = el("polygon", { points: patch.map(P2).join(" "), "fill-opacity": 0.22, "stroke-width": 1.2, "stroke-linejoin": "round" }, dsvg);
+      sp.style.fill = "var(--fg)"; sp.style.stroke = "var(--fg)";
+    }
 
     // Maximum (ring) and the current point on the surface.
     if (F.top) {
@@ -1474,11 +1482,12 @@
     dcap.innerHTML =
       `<ul><li>Each face corresponds to the extreme point with the same color; level curves at every ${fmt(F.step)}.</li>` +
       `<li>Drag the point to set <i>u</i>; drag elsewhere to rotate.</li>` +
+      (!SUBGRADIENTS ? "</ul>" :
       `<li>The gray plane is a supporting plane with gradient <i>g</i>(<i>x</i>(<i>u</i>)); on an edge or corner ` +
       `there are multiple subgradients, and the plane tilts as <i>g</i>(<i>x</i>(<i>u</i>)) is dragged below.</li>` +
       `<li>Optimality requires complementarity; some <i>g</i> &isin; &part;<i>h</i><sub>LP</sub>(<i>u</i>) has, for each <i>i</i>, either` +
       `<ol><li><i>u</i><sub><i>i</i></sub> = 0 and <i>g</i><sub><i>i</i></sub> &le; 0, or</li>` +
-      `<li><i>u</i><sub><i>i</i></sub> &gt; 0 and <i>g</i><sub><i>i</i></sub> = 0.</li></ol></li></ul>`;
+      `<li><i>u</i><sub><i>i</i></sub> &gt; 0 and <i>g</i><sub><i>i</i></sub> = 0.</li></ol></li></ul>`);
   }
 
   // One relaxed constraint: one line per extreme point, h_LP is their lower envelope.
@@ -1517,14 +1526,16 @@
     });
     // Supporting lines at u: their slopes are the subgradients, a fan at a kink (shaded); the one with
     // slope g(x(u)) is drawn, and tilts as x(u) is dragged along the optimal edge.
-    const sl = sub.verts.map(j => P[j].d[i]), s0 = Math.min(...sl), s1 = Math.max(...sl), D = 0.06 * U;
-    const at = (w, s) => [sx(w), sy(h + s * (w - u[i]))].map(v => v.toFixed(1)).join(",");
-    // Thick outline + fill in one translucent group, so the band is uniform (a thick line with one subgradient).
-    const fan = el("polygon", { points: [at(u[i], 0), at(u[i] + D, s1), at(u[i] + D, s0), at(u[i], 0), at(u[i] - D, s0), at(u[i] - D, s1)].join(" "),
-                                "stroke-width": 10, "stroke-linejoin": "round" }, el("g", { opacity: 0.18 }, g));
-    fan.style.fill = "var(--fg)"; fan.style.stroke = "var(--fg)";
-    const [ta, tb] = [at(u[i] - D, sub.g[0]), at(u[i] + D, sub.g[0])].map(s => s.split(","));
-    el("line", { x1: ta[0], y1: ta[1], x2: tb[0], y2: tb[1], "stroke-width": 1.6 }, g).style.stroke = "var(--fg)";
+    if (SUBGRADIENTS) {
+      const sl = sub.verts.map(j => P[j].d[i]), s0 = Math.min(...sl), s1 = Math.max(...sl), D = 0.06 * U;
+      const at = (w, s) => [sx(w), sy(h + s * (w - u[i]))].map(v => v.toFixed(1)).join(",");
+      // Thick outline + fill in one translucent group, so the band is uniform (a thick line with one subgradient).
+      const fan = el("polygon", { points: [at(u[i], 0), at(u[i] + D, s1), at(u[i] + D, s0), at(u[i], 0), at(u[i] - D, s0), at(u[i] - D, s1)].join(" "),
+                                  "stroke-width": 10, "stroke-linejoin": "round" }, el("g", { opacity: 0.18 }, g));
+      fan.style.fill = "var(--fg)"; fan.style.stroke = "var(--fg)";
+      const [ta, tb] = [at(u[i] - D, sub.g[0]), at(u[i] + D, sub.g[0])].map(s => s.split(","));
+      el("line", { x1: ta[0], y1: ta[1], x2: tb[0], y2: tb[1], "stroke-width": 1.6 }, g).style.stroke = "var(--fg)";
+    }
     const fr = el("rect", { x: X0, y: Y0, width: X1 - X0, height: Y1 - Y0, fill: "none", "stroke-width": 1 }, dsvg);
     fr.style.stroke = "var(--axis)";
     labelPx(X1 - 6, sy(zLP) + 16, [["z", "it"], ["LP", "sub"]], { "text-anchor": "end", class: "small" }, dsvg);
@@ -1543,10 +1554,11 @@
     };
     dcap.innerHTML =
       `<ul><li>Each line corresponds to the extreme point with the same color.</li>` +
+      (!SUBGRADIENTS ? "</ul>" :
       `<li>Subdifferential in shaded white; a line when only one subgradient exists, a fan when multiple exist.</li>` +
       `<li>Optimality requires complementarity; either` +
       `<ol><li><i>u</i><sub>${i + 1}</sub> = 0 and some subgradient is &le; 0, or</li>` +
-      `<li><i>u</i><sub>${i + 1}</sub> &gt; 0 and 0 &isin; &part;<i>h</i><sub>LP</sub>(<i>u</i>).</li></ol></li></ul>`;
+      `<li><i>u</i><sub>${i + 1}</sub> &gt; 0 and 0 &isin; &part;<i>h</i><sub>LP</sub>(<i>u</i>).</li></ol></li></ul>`);
   }
 
   // Both relaxed: map over (u_1, u_2), coloured by the optimal extreme point, with level curves of h_LP.
