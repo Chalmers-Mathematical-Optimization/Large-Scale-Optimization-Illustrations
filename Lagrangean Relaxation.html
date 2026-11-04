@@ -858,8 +858,9 @@
   const ticks = [1, 2].map(i => document.getElementById("ticks" + i));
   const optVectors = document.getElementById("optVectors");
   const optFit = document.getElementById("optFit");          // zoom out so the arrows fit
-  // "Immediate subproblem solve" off: changing u leaves everything at the u of the last evaluation (uAt,
-  // slider values) until "Reevaluate"; null forces evaluating at the sliders (e.g. a new problem).
+  // "Immediate subproblem solve" off: changing u leaves everything but the penalised objective vector at
+  // the u of the last evaluation (uAt, slider values) until "Reevaluate"; null forces evaluating at the
+  // sliders (e.g. a new problem).
   const optImmediate = document.getElementById("optImmediate");
   const reevalRow = document.getElementById("reevalRow"), reevalBtn = document.getElementById("reeval");
   const sliderU = () => sliders.map(s => parseFloat(s.value));
@@ -868,12 +869,9 @@
     reevalRow.hidden = optImmediate.checked;
     reevalBtn.disabled = !!uAt && sliderU().every((v, i) => v === uAt[i]);
   };
-  // A change of u (sliders, ticks, picking in the dual panel): evaluated now, or once "Reevaluate" is clicked.
-  function uChanged() {
-    if (optImmediate.checked) { render(); return; }
-    uvals.forEach((t, i) => { t.textContent = "= " + (+sliders[i].value).toFixed(2); });
-    syncReeval();
-  }
+  // A change of u (sliders, ticks, picking in the dual panel): the subproblem is solved now, or once
+  // "Reevaluate" is clicked; the penalised objective vector follows the sliders either way.
+  function uChanged() { render(); }
   // When several points are optimal, x(u) can be dragged within that set (an edge, or all of X_LP).
   let tieKey = null, tiePt = null, tieShape = null, tieDrag = false;
   // Parameter in [0, 1] of the point of segment a-b nearest to q (any dimension), and the nearest point of
@@ -971,6 +969,10 @@
     });
     syncReeval();
     const anyU = R.some(i => u[i] > 0);
+    // u at the sliders, for the penalised objective vector (ahead of u when not solved immediately).
+    const uv = [0, 1].map(i => (R.includes(i) ? sliderU()[i] : 0));
+    let cuv = C.slice();
+    R.forEach(i => { cuv = add(cuv, scale(uv[i], CONS[i].a)); });
 
     // Penalised objective and the optimal extreme point of the subproblem.
     let cu = C.slice();
@@ -1008,12 +1010,12 @@
 
     // Zoom out if the arrows (c chain, resultant, penalty arrows) would leave the view (only what is shown).
     const vecsOn = optVectors.checked;
-    const reach = [[0, 0], C, cu];
+    const reach = [[0, 0], C, cuv];
     let acc = C.slice();
     R.forEach(i => {
       const k = CONS[i];
-      acc = add(acc, scale(u[i], k.a));
-      if (vecsOn) reach.push(acc, add(k.foot, scale(u[i], k.a)));
+      acc = add(acc, scale(uv[i], k.a));
+      if (vecsOn) reach.push(acc, add(k.foot, scale(uv[i], k.a)));
     });
     const B = { xmin: Math.min(...reach.map(q => q[0])), xmax: Math.max(...reach.map(q => q[0])),
                 ymin: Math.min(...reach.map(q => q[1])), ymax: Math.max(...reach.map(q => q[1])) };
@@ -1074,8 +1076,17 @@
     // Scaled normals u_i A_i of the relaxed constraints.
     (vecsOn ? R : []).forEach(i => {
       const k = CONS[i];
-      arrow(k.foot, add(k.foot, scale(u[i], k.a)), NCOL[i], dyn, { hl: "n" + (i + 1) });
-      obSeg(k.foot, add(k.foot, scale(u[i], k.a)), 2.5);
+      // Right-angle mark at the foot: u_i A_i is orthogonal to the constraint line.
+      const [fx0, fy0] = px(k.foot), [tx, ty] = px(add(k.foot, scale(uv[i], k.a)));
+      const L = Math.hypot(tx - fx0, ty - fy0);
+      if (L > 14) {
+        const s = 9, nx = s * (tx - fx0) / L, ny = s * (ty - fy0) / L;     // along the arrow, then along the line
+        const sq = el("polyline", { points: `${fx0 + nx},${fy0 + ny} ${fx0 + nx - ny},${fy0 + ny + nx} ${fx0 - ny},${fy0 + nx}`,
+                                    fill: "none", "stroke-width": 1.4 }, dyn);
+        sq.style.stroke = `var(${NCOL[i]})`;
+      }
+      arrow(k.foot, add(k.foot, scale(uv[i], k.a)), NCOL[i], dyn, { hl: "n" + (i + 1) });
+      obSeg(k.foot, add(k.foot, scale(uv[i], k.a)), 2.5);
       const [fx, fy] = px(k.foot);
       el("circle", { cx: fx, cy: fy, r: 3, "data-hl": "n" + (i + 1) }, dyn).style.fill = `var(${NCOL[i]})`;
       obDot(k.foot, 4, 30);
@@ -1087,11 +1098,11 @@
     arrow(O, tip, "--c", dyn, { width: 3, hl: "c" });
     obSeg(O, tip, 2.5);
     R.forEach(i => {
-      const v = scale(u[i], CONS[i].a);
+      const v = scale(uv[i], CONS[i].a);
       if (vecsOn) { arrow(tip, add(tip, v), NCOL[i], dyn, { width: 2, dash: "6 4", hl: "n" + (i + 1) }); obSeg(tip, add(tip, v), 2); }
       tip = add(tip, v);
     });
-    if (anyU) { arrow(O, tip, "--res", dyn, { width: 3, hl: "res" }); obSeg(O, tip, 2.5); }
+    if (R.some(i => uv[i] > 0)) { arrow(O, tip, "--res", dyn, { width: 3, hl: "res" }); obSeg(O, tip, 2.5); }
     const [cox, coy] = px(O);
     el("circle", { cx: cox, cy: coy, r: 3 }, dyn).style.fill = "var(--fg)";
     obDot(O, 4, 30);
@@ -1140,13 +1151,13 @@
     });
     want([["X", "it"], ["LP", "sub"]], { "font-size": 22, "data-lab": "X_LP" }, () => [px(XLP_LABEL)]);
     want([[vecStr(C), ""]], { "data-lab": "c", style: "fill:var(--c)" }, L => beside(O, C, 4, L));
-    if (Math.hypot(cu[0] - C[0], cu[1] - C[1]) > 0.08 * UNIT) {
+    if (Math.hypot(cuv[0] - C[0], cuv[1] - C[1]) > 0.08 * UNIT) {
       want([[vecStr(C), ""], ...R.flatMap(i => [[" + ", ""], ["u", "it"], [String(i + 1), "it-sub"], ...vecParts(i)])], { "data-lab": "res" },
            L => beside(O, tip, 5, L));
     }
     // Normal labels: past the arrow tip, else beside the arrow.
-    R.filter(i => vecsOn && u[i] * CONS[i].n > 0.08 * UNIT).forEach(i => {
-      const k = CONS[i], tipN = add(k.foot, scale(u[i], k.a));
+    R.filter(i => vecsOn && uv[i] * CONS[i].n > 0.08 * UNIT).forEach(i => {
+      const k = CONS[i], tipN = add(k.foot, scale(uv[i], k.a));
       want([["u", "it"], [String(i + 1), "it-sub"], ...vecParts(i)], { class: "small", "data-lab": "n" + (i + 1) },
            L => [...around(tipN, 5, L, sdir(k.a), 5), ...beside(k.foot, tipN, 4, L).map((c, n) => [...c, 15 + 3 * n])]);
     });
