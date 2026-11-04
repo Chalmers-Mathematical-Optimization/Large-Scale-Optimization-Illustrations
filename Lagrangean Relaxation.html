@@ -17,14 +17,8 @@
   as written in CONFIG (not rescaled). Appending u_i A_i for i in R to c gives the penalised
   objective c + sum_{i in R} u_i A_i.
 
-  Since  h_LP(u) = c^T x(u) + sum_{i in R} u_i (A_i^T x(u) - b_i),  and (A_i^T x(u) - b_i) / ||A_i|| is
-  the signed distance from line i to x(u) (positive when x(u) violates constraint i), each term
-      u_i (A_i^T x(u) - b_i) = (u_i ||A_i||) * ((A_i^T x(u) - b_i) / ||A_i||)
-  is drawn as a rectangle: one side is as long as the penalty arrow u_i A_i, the other is the
-  distance from x(u) to the line (red: x(u) violates the constraint, the term adds; green:
-  satisfied, the term subtracts).
   The slider ranges are computed from the geometry so that every extreme point that is optimal
-  for some u >= 0 can be reached (with ~15% headroom). Long arrows and boxes simply run off the view.
+  for some u >= 0 can be reached (with ~15% headroom). Long arrows simply run off the view.
   The panel below the controls plots h_LP: one line per extreme point (one relaxed constraint),
   or a map over (u_1, u_2) coloured by the optimal extreme point (both relaxed).
 
@@ -34,7 +28,7 @@
   (default: none, or the constraints whose price is given),
   dual=0 (hide the dual-function panel), labels=1 (start with all of the figure's labels shown,
   except the coordinates of x(u); or a comma-separated list of label groups: points, constraints, xlp,
-  objective, vectors, boxes, axes, coords; by default a label appears while hovering over its object), theme=auto | light | dark (as in the Theme dropdown; auto, the default, follows the system setting;
+  objective, vectors, axes, coords; by default a label appears while hovering over its object), theme=auto | light | dark (as in the Theme dropdown; auto, the default, follows the system setting;
   e.g. theme=light to force light mode inside Canvas), layout=auto | vertical | horizontal (dual-function panel below the figure,
   or beside it; auto, the default, puts it beside the figure when the window is wide enough; side=1 is
   an alias for horizontal), map=3d | vertex | value (3-D graph, the default; or a 2-D map coloured by optimal extreme point or by the value of h_LP).
@@ -63,8 +57,9 @@
     --label-halo: rgb(255 255 255 / 0.75); --label-halo-w: 2.5px;
     --star: #f5c518; --star-edge: #111116;
     /* extreme points (dots in the figure, lines/regions in the dual panel) */
-    --v0: #e0a030; --v1: #3fa0b0; --v2: #8fb33a; --v3: #c06aa8;
-    --v4: #9c755f; --v5: #5b8ad6; --v6: #e07a50; --v7: #7a7a86;
+    /* hues alternate around the wheel so consecutive (adjacent) extreme points contrast */
+    --v0: #e8a317; --v1: #2f6fe0; --v2: #d6457a; --v3: #3fa34d;
+    --v4: #8e3fb8; --v5: #1fb5c4; --v6: #a8552a; --v7: #6f6f78;
   }
   /* data-theme is set by the script: the Theme dropdown, or ?theme=; Auto follows prefers-color-scheme. */
   :root[data-theme="dark"] {
@@ -123,16 +118,18 @@
   .lpeditor .lperror { color: var(--neg); }
   /* Room for the system (values, objective, 2 constraints, x ∈ X_LP), so the page doesn't jump */
   .formula { display: flex; justify-content: safe center; align-items: flex-start; font-size: 1.05rem; margin: 4px 0 8px; line-height: 1.6; min-height: calc(5 * 1.6em); }
-  /* Columns: lhs | min / s. t. | left side | relation | right side | relax checkbox. No column gap, so a
+  /* Columns: lhs | min / s. t. | x1 term | sign | x2 term | relation | right side | relax checkbox (the x1 and
+     x2 terms of the constraints line up). No column gap, so a
      struck-through constraint is struck continuously; spacing comes from padding and the relation's spaces.
      The objective spans the checkbox column too, so the checkboxes sit just right of their constraints. */
-  .formula .f { display: grid; grid-template-columns: auto auto auto auto auto 1fr; align-items: baseline; }
+  .formula .f { display: grid; grid-template-columns: auto auto auto auto auto auto auto 1fr; align-items: baseline; }
   .formula .h, .formula .op { padding-right: 0.6em; }
   .formula .op { text-align: left; }
   .formula .under { display: inline-flex; flex-direction: column; align-items: center; line-height: 1; }
   .formula .under > :last-child { font-size: 0.75em; }
-  .formula .l { text-align: right; }
-  .formula .obj { grid-column: span 4; }
+  .formula .t1, .formula .t2 { text-align: right; }
+  .formula .s { padding: 0 0.25em; text-align: center; }
+  .formula .obj { grid-column: span 6; }
   .formula .x { padding-left: 0.6em; }
   /* Objective row: the values at x(u) above the terms and factors, one column each so they line up */
   .formula .stk { display: grid; grid-template-rows: auto auto; grid-auto-flow: column; row-gap: 0.4em; justify-items: center; align-items: baseline; white-space: nowrap; }
@@ -193,6 +190,13 @@
   /* Slider of a constraint that is not relaxed: greyed out */
   .controls.off label[for], .controls.off .uval, .controls.off input[type=range] { opacity: 0.4; }
   .controls input[type=range]:disabled { cursor: not-allowed; }
+  /* "Reevaluate" under the sliders, when the subproblem is not solved immediately */
+  .reeval { display: flex; justify-content: center; margin-top: 2px; }
+  .reeval[hidden] { display: none; }
+  .reeval button { padding: 3px 14px; border: 1px solid var(--axis); border-radius: 6px; background: var(--bg);
+                   color: var(--fg); font: inherit; cursor: pointer; }
+  .reeval button:hover:not(:disabled) { border-color: var(--fg); }
+  .reeval button:disabled { opacity: 0.4; cursor: default; }
   .wrap sub, .wrap sup { line-height: 0; }   /* keep scripts from stretching the line box */
   #u1, .relax1 { accent-color: var(--n1); }
   #u2, .relax2 { accent-color: var(--n2); }
@@ -235,7 +239,8 @@
   .mapmode[hidden] { display: none; }
   #subfig { margin-top: 14px; }
   .dualcap { font-size: 0.9rem; color: var(--muted); text-align: center; line-height: 1.6; margin: 4px 8px 0; }
-  .dualcap ol { display: inline-block; text-align: left; margin: 0; padding-left: 1.6em; }
+  .dualcap ul { display: inline-block; text-align: left; margin: 0; padding-left: 1.4em; }
+  .dualcap ol { margin: 0; padding-left: 1.6em; }
   /* The subgradient caption over a hidden copy of its longest version, so its height doesn't change with u */
   #subcap { display: grid; }
   #subcap > span { grid-area: 1 / 1; }
@@ -254,14 +259,14 @@
     <button type="button" id="optToggle" class="optbtn" aria-expanded="false" aria-controls="optPanel">Options<span class="caret" aria-hidden="true">▾</span></button></div>
   <div class="options" id="optPanel" hidden>
     <label><input type="checkbox" id="optVectors" checked> Penalty vectors</label>
-    <span class="opt"><label><input type="checkbox" id="optBoxes"> Penalty boxes</label><span class="help">
-      <button type="button" aria-label="About penalty boxes" aria-describedby="boxesHelp">?</button>
-      <span class="pop" id="boxesHelp" role="tooltip">Shows boxes whose areas correspond to the penalty term(s).<br>
-        <i>Note:</i> This is not a common visualization, and is not used elsewhere in the course.</span>
-    </span></span>
     <span class="opt"><label><input type="checkbox" id="optFit"> Fit graph</label><span class="help">
       <button type="button" aria-label="About fit graph" aria-describedby="fitHelp">?</button>
       <span class="pop" id="fitHelp" role="tooltip">Scales the graph so all elements are visible.</span>
+    </span></span>
+    <span class="opt"><label><input type="checkbox" id="optImmediate" checked> Immediate subproblem solve</label><span class="help">
+      <button type="button" aria-label="About immediate subproblem solve" aria-describedby="immHelp">?</button>
+      <span class="pop" id="immHelp" role="tooltip">When off, changing <i>u</i> does not update the graphs and values
+        until “Reevaluate” is clicked, as solving the subproblem typically takes time.</span>
     </span></span>
     <label>Layout <select id="optLayout">
       <option value="auto">Auto</option>
@@ -296,6 +301,7 @@
     <span class="track"><input id="u2" type="range" min="0" max="2.5" step="0.01" value="0"><span class="ticks" id="ticks2"></span></span>
     <span class="uval" id="uval2">= 0.00</span>
   </div>
+  <div class="reeval" id="reevalRow" hidden><button type="button" id="reeval" disabled>Reoptimize</button></div>
   </div>
   <div class="dual" id="dual">
     <div class="mapmode" id="mapmode">
@@ -471,27 +477,28 @@
     return st.includes("sub") ? `<sub>${t}</sub>` : st === "sup" ? `<sup>${t}</sup>` : t;
   }).join("").replace(/ /g, "&nbsp;");
 
-  // Constraint i with its numbers written out, as label parts: A_i^T x as "x1 − 0.15 x2" (x_j(u) when atU),
-  // A_i^T x <= b_i (rel "le") or A_i^T x - b_i (rel "slack"); A_i as "(1, −0.15)"; ||A_i|| rounded.
+  // Constraint i with its numbers written out, as label parts: A_i^T x as "x1 − 0.15 x2",
+  // A_i^T x <= b_i (rel "le") or A_i^T x - b_i (rel "slack"); A_i as "(1, −0.15)".
   const numStr = v => String(+(+v).toPrecision(6)).replace("-", "−");
-  function linParts(i, atU) {
+  function linParts(i) { return termParts(CONS[i].a); }
+  // a^T x for a coefficient vector a (also c^T x), "0" when a = 0.
+  function termParts(a) {
     const parts = [];
-    CONS[i].a.forEach((c, n) => {
+    a.forEach((c, n) => {
       if (c === 0) return;
       parts.push([parts.length ? (c < 0 ? " − " : " + ") : c < 0 ? "−" : "", ""]);
       if (Math.abs(c) !== 1) parts.push([numStr(Math.abs(c)), ""]);
       parts.push(["x", "it"], [String(n + 1), "sub"]);
-      if (atU) parts.push(["(", ""], ["u", "it"], [")", ""]);
     });
-    return parts.filter(p => p[0]);
+    return parts.length ? parts.filter(p => p[0]) : [["0", ""]];
   }
-  const consParts = (i, rel, atU) => {
+  const consParts = (i, rel) => {
     const b = CONS[i].b;
-    return [...linParts(i, atU), ...(rel === "le" ? [[" ≤ " + numStr(b), ""]]
+    return [...linParts(i), ...(rel === "le" ? [[" ≤ " + numStr(b), ""]]
                                     : b === 0 ? [] : [[(b < 0 ? " + " : " − ") + numStr(Math.abs(b)), ""]])];
   };
-  const vecParts = i => [["(" + CONS[i].a.map(numStr).join(", ") + ")", ""]];
-  const normStr = i => numStr(+CONS[i].n.toFixed(2));
+  const vecStr = a => "(" + a.map(numStr).join(", ") + ")";
+  const vecParts = i => [[vecStr(CONS[i].a), ""]];
 
   // ---------------------------------------------------------------- label placement
   // Everything drawn in the figure registers itself as an obstacle (segments and dots, in px).
@@ -601,7 +608,6 @@
     { id: "xlp", name: "<i>X</i><sub>LP</sub>", keys: ["X_LP"] },
     { id: "objective", name: "Objective", keys: ["c", "res"] },
     { id: "vectors", name: "Penalty vectors", keys: ["n1", "n2"], needs: "optVectors" },   // greyed out while that option is off
-    { id: "boxes", name: "Penalty boxes", keys: ["side1", "side2", "area1", "area2", "dist1", "dist2"], needs: "optBoxes" },
     { id: "axes", name: "Axes", keys: ["ax1", "ax2"] },
     { id: "coords", name: "Coordinates of <i>x</i>(<i>u</i>)", keys: ["hover-xs"] },
   ];
@@ -846,8 +852,24 @@
   const uvals = [1, 2].map(i => document.getElementById("uval" + i));
   const rows = [1, 2].map(i => document.getElementById("row" + i));
   const ticks = [1, 2].map(i => document.getElementById("ticks" + i));
-  const optVectors = document.getElementById("optVectors"), optBoxes = document.getElementById("optBoxes");
-  const optFit = document.getElementById("optFit");          // zoom out so arrows and boxes fit
+  const optVectors = document.getElementById("optVectors");
+  const optFit = document.getElementById("optFit");          // zoom out so the arrows fit
+  // "Immediate subproblem solve" off: changing u leaves everything at the u of the last evaluation (uAt,
+  // slider values) until "Reevaluate"; null forces evaluating at the sliders (e.g. a new problem).
+  const optImmediate = document.getElementById("optImmediate");
+  const reevalRow = document.getElementById("reevalRow"), reevalBtn = document.getElementById("reeval");
+  const sliderU = () => sliders.map(s => parseFloat(s.value));
+  let uAt = null;
+  const syncReeval = () => {
+    reevalRow.hidden = optImmediate.checked;
+    reevalBtn.disabled = !!uAt && sliderU().every((v, i) => v === uAt[i]);
+  };
+  // A change of u (sliders, ticks, picking in the dual panel): evaluated now, or once "Reevaluate" is clicked.
+  function uChanged() {
+    if (optImmediate.checked) { render(); return; }
+    uvals.forEach((t, i) => { t.textContent = "= " + (+sliders[i].value).toFixed(2); });
+    syncReeval();
+  }
   // When several points are optimal, x(u) can be dragged within that set (an edge, or all of X_LP).
   let tieKey = null, tiePt = null, tieShape = null, tieDrag = false;
   // Parameter in [0, 1] of the point of segment a-b nearest to q (any dimension), and the nearest point of
@@ -880,15 +902,20 @@
   const NCOL = ["--n1", "--n2"];
   const fmt = v => (Math.abs(v) < 5e-3 ? 0 : v).toFixed(2);
   // Constraint as [left side, relation, right side], so the relations line up in the formula.
-  const consHtml = i => [partsHtml(linParts(i)), "&nbsp;≤&nbsp;", numStr(CONS[i].b)];
-  // A_j^T x - b_j as HTML, and A_j^T x(u) - b_j as SVG label parts (j counts from 1).
+  // Constraint i as cells [x1 term, sign, x2 term, relation, right side], so the terms line up across rows.
+  const termHtml = (c, n) => (Math.abs(c) === 1 ? "" : numStr(Math.abs(c))) + `<i>x</i><sub>${n + 1}</sub>`;
+  const consHtml = i => {
+    const [a1, a2] = CONS[i].a;
+    return [a1 ? (a1 < 0 ? "−" : "") + termHtml(a1, 0) : "", a2 < 0 ? "−" : a1 && a2 ? "+" : "",
+            a2 ? termHtml(a2, 1) : "", "&nbsp;≤&nbsp;", numStr(CONS[i].b)];
+  };
+  // A_j^T x - b_j as HTML (j counts from 1).
   const slackHtml = j => partsHtml(consParts(j - 1, "slack"));
-  const slack = j => consParts(+j - 1, "slack", true);
-  // Six-column layout:  lhs | min / s. t. | expression (objective: one cell; constraint: left, relation,
-  // right, each with class cls; the objective also spans the next column) | relax-checkbox (constraint rows only)
+  // Eight-column layout:  lhs | min / s. t. | expression (objective: one cell; constraint: x1 term, sign,
+  // x2 term, relation, right, each with class cls; the objective also spans the next column) | relax-checkbox (constraint rows only)
   const fRow = (lhs, op, expr, extra = "", cls = "") => `<span class="h">${lhs}</span><span class="op">${op}</span>` +
     (Array.isArray(expr)
-      ? expr.map((e, n) => `<span class="${["l", "m", "r"][n]}${cls}">${e}</span>`).join("")
+      ? expr.map((e, n) => `<span class="${["t1", "s", "t2", "m", "r"][n]}${cls}">${e}</span>`).join("")
       : `<span class="obj">${expr}</span>`) + (Array.isArray(expr) ? `<span class="x">${extra}</span>` : "");
   let showDual = true;
 
@@ -910,7 +937,8 @@
     // relaxed, these are for moving this slider with the other one kept where it is (they move with it):
     // the other price's term is folded into each extreme point's constant.
     // Clicking a tick sets that slider exactly to it.
-    const u = [0, 1].map(i => (R.includes(i) ? parseFloat(sliders[i].value) : 0));
+    if (optImmediate.checked || !uAt) uAt = sliderU();
+    const u = [0, 1].map(i => (R.includes(i) ? uAt[i] : 0));
     const opt = R.length ? dualOptima(R, P) : [];
     const breaksFor = i => sweep(P.map(p => p.cv + R.reduce((s, k) => s + (k === i ? 0 : u[k] * p.d[k]), 0)),
                                  P.map(p => p.d[i])).slice(1).map(b => b.t);
@@ -927,7 +955,7 @@
         b.innerHTML = star ? `<span class="star">☆</span>` : "▲";
         b.title = `${star ? "optimal" : "x(u) switches extreme point at"} u${i + 1} = ${fmt(v)}`;
         b.style.left = `${100 * v / +sliders[i].max}%`;
-        b.addEventListener("click", () => { sliders[i].step = "any"; sliders[i].value = String(v); render(); });
+        b.addEventListener("click", () => { sliders[i].step = "any"; sliders[i].value = String(v); uChanged(); });
         ticks[i].appendChild(b);
       });
     });
@@ -935,8 +963,9 @@
       const on = R.includes(i);
       sliders[i].disabled = !on;
       rows[i].classList.toggle("off", !on);
-      uvals[i].textContent = "= " + (on ? u[i] : +sliders[i].value).toFixed(2);
+      uvals[i].textContent = "= " + (+sliders[i].value).toFixed(2);
     });
+    syncReeval();
     const anyU = R.some(i => u[i] > 0);
 
     // Penalised objective and the optimal extreme point of the subproblem.
@@ -973,44 +1002,17 @@
     const sub = { img: P.map(p => R.map(i => p.d[i])), g: R.map(i => xd[i]),
                   verts: flat ? P.map((p, j) => j) : tied.length >= 2 ? tied : [best] };
 
-    // Zoom out if the arrows (c chain, resultant, penalty arrows) or penalty boxes would leave the view.
-    // Points that must be visible when x(u) = q (only what is shown):
-    const vecsOn = optVectors.checked, boxesOn = optBoxes.checked;
-    const reachFor = q => {
-      const pts = [[0, 0], C, cu];
-      let acc = C.slice();
-      R.forEach(i => {
-        const k = CONS[i];
-        acc = add(acc, scale(u[i], k.a));
-        if (vecsOn) pts.push(acc, add(k.foot, scale(u[i], k.a)));
-        if (!boxesOn) return;
-        const dist = (dot(k.a, q) - k.b) / k.n, F = add(q, scale(-dist, k.e)), w = u[i] * k.n;
-        let t = [-k.e[1], k.e[0]];
-        if (dot(t, [q[0] - cen[0], q[1] - cen[1]]) < 0) t = scale(-1, t);
-        pts.push(F, add(F, scale(w, t)), add(q, scale(w, t)));
-      });
-      return pts;
-    };
-    const bbox = pts => ({ xmin: Math.min(...pts.map(q => q[0])), xmax: Math.max(...pts.map(q => q[0])),
-                           ymin: Math.min(...pts.map(q => q[1])), ymax: Math.max(...pts.map(q => q[1])) });
-    // The boxes follow x(u), which jumps at prices where another extreme point k takes over. To avoid a
-    // sudden jump in zoom, k's boxes also count, with weight exp(-distance / tau), where distance is how
-    // far u is (in price space) from where k ties with the current optimum: at the switch both fit.
-    const B = bbox(reachFor(xs));
-    if (R.length) {
-      const tau = 0.05 * Math.max(...R.map(i => +sliders[i].max));
-      P.forEach((p, k) => {
-        if (k === best) return;
-        const gd = Math.hypot(...R.map(i => p.d[i] - P[best].d[i]));
-        if (gd < 1e-12) return;
-        const hk = p.cv + R.reduce((s2, i) => s2 + u[i] * p.d[i], 0);
-        const wgt = Math.exp(-Math.max(0, hk - h) / gd / tau);
-        if (wgt < 1e-3) return;
-        const Bk = bbox(reachFor(domain[k]));
-        B.xmin += wgt * Math.min(0, Bk.xmin - B.xmin); B.xmax += wgt * Math.max(0, Bk.xmax - B.xmax);
-        B.ymin += wgt * Math.min(0, Bk.ymin - B.ymin); B.ymax += wgt * Math.max(0, Bk.ymax - B.ymax);
-      });
-    }
+    // Zoom out if the arrows (c chain, resultant, penalty arrows) would leave the view (only what is shown).
+    const vecsOn = optVectors.checked;
+    const reach = [[0, 0], C, cu];
+    let acc = C.slice();
+    R.forEach(i => {
+      const k = CONS[i];
+      acc = add(acc, scale(u[i], k.a));
+      if (vecsOn) reach.push(acc, add(k.foot, scale(u[i], k.a)));
+    });
+    const B = { xmin: Math.min(...reach.map(q => q[0])), xmax: Math.max(...reach.map(q => q[0])),
+                ymin: Math.min(...reach.map(q => q[1])), ymax: Math.max(...reach.map(q => q[1])) };
     fitView(optFit.checked ? [[B.xmin, B.ymin], [B.xmax, B.ymax]] : []);   // [] = the normal view
     drawGrid();
 
@@ -1047,6 +1049,11 @@
       const e = el("line", { x1: A[0], y1: A[1], x2: B[0], y2: B[1], "stroke-width": 8, "stroke-linecap": "round", "stroke-opacity": 0.3 }, dyn);
       e.style.stroke = "var(--res)";
     }
+    // All of the domain, when c + u_1 A_1 + u_2 A_2 = 0.
+    if (tieShape && tieShape.poly) {
+      const f = el("polygon", { points: pts(tieShape.poly), "stroke-width": 8, "stroke-linejoin": "round", "stroke-opacity": 0.3, "fill-opacity": 0.15 }, dyn);
+      f.style.stroke = "var(--res)"; f.style.fill = "var(--res)";
+    }
 
     // Extreme points of the subproblem domain, coloured as in the dual panel.
     domain.forEach((v, j) => {
@@ -1059,54 +1066,6 @@
     const V = viewRect();
     want([["x", "it"], ["1", "sub"]], { class: "small", "data-lab": "ax1" }, fixedAt([V.xmax - 9 / S, -26 / S], "end"));
     want([["x", "it"], ["2", "sub"]], { class: "small", "data-lab": "ax2" }, fixedAt([7 / S, V.ymax - 20 / S]));
-
-    const boxLabels = [];   // queued after the main labels
-    // u_i (A_i^T x(u) - b_i) as rectangles: dotted side = distance (A_i^T x(u) - b_i)/||A_i|| from x(u) to line i,
-    // other side = u_i ||A_i|| (the length of the penalty arrow) along the line.
-    // Red when x(u) violates the constraint (A_i^T x(u) > b_i), green when it satisfies it.
-    (boxesOn ? R : []).forEach(i => {
-      const k = CONS[i], d = xd[i], dist = d / k.n, w = u[i] * k.n;
-      if (Math.abs(dist) < 1e-9) return;
-      const col = d > 0 ? "var(--neg)" : "var(--pos)";
-      const F = add(xs, scale(-dist, k.e));
-      let t = [-k.e[1], k.e[0]];
-      if (dot(t, [xs[0] - cen[0], xs[1] - cen[1]]) < 0) t = scale(-1, t);   // extend away from X_LP's centre
-      const j = String(i + 1);
-      if (w > 1e-9) {
-        const rect = [xs, F, add(F, scale(w, t)), add(xs, scale(w, t))];
-        const r = el("polygon", { points: pts(rect), "fill-opacity": 0.2, "stroke-width": 1 }, dyn);
-        r.style.fill = col; r.style.stroke = col; r.setAttribute("data-hl", "area" + j);
-        obSeg(rect[1], rect[2], 0.6); obSeg(rect[3], rect[0], 0.6);
-        // The two sides as long as the penalty arrow u_i A_i, in that arrow's colour.
-        [xs, F].forEach(p0 => {
-          const [x1, y1] = px(p0), [x2, y2] = px(add(p0, scale(w, t)));
-          el("line", { x1, y1, x2, y2, "stroke-width": 2.6, "stroke-linecap": "round" }, dyn).style.stroke = `var(${NCOL[i]})`;
-          hitLine([x1, y1], [x2, y2], "side" + j, dyn);
-          obSeg(p0, add(p0, scale(w, t)), 1.5);
-        });
-        // Label the side lying on the constraint line (length u_i ||A_i||), preferably outside the box.
-        if (w > 0.3 * UNIT) {
-          boxLabels.push(() => want([[normStr(i) + " ", ""], ["u", "it"], [j, "it-sub"]], { class: "small", "data-lab": "side" + j },
-            L => beside(F, add(F, scale(w, t)), 4, L, [0.5, 0.3, 0.7, 0.15, 0.85], sdir(scale(-dist, k.e)))));
-        }
-        // The area, inside the box if it fits.
-        const rpx = rect.map(px);
-        boxLabels.push(() => want([["u", "it"], [j, "it-sub"], ["(", ""], ...slack(j), [")", ""]], { class: "small", "data-lab": "area" + j },
-          () => [0.5, 0.35, 0.65, 0.2, 0.8, 0.1, 0.9].map(f => {
-            // along the box's midline, so that part of a box running off the view still works
-            const m0 = scale(0.5, add(rpx[0], rpx[1])), m1 = scale(0.5, add(rpx[3], rpx[2]));
-            return add(m0, scale(f, [m1[0] - m0[0], m1[1] - m0[1]]));
-          }),
-          b => [[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]].every(q => inConvex(rpx, q)), 60));
-      }
-      const [x1, y1] = px(xs), [x2, y2] = px(F);
-      const seg = el("line", { x1, y1, x2, y2, "stroke-width": 2.2, "stroke-dasharray": "1 5", "stroke-linecap": "round" }, dyn);
-      seg.style.stroke = col;
-      hitLine([x1, y1], [x2, y2], "dist" + j, dyn);
-      obSeg(xs, F, 1.5);
-      boxLabels.push(() => want([["(", ""], ...slack(j), [") / " + normStr(i), ""]], { class: "small", "data-lab": "dist" + j },
-        L => beside(xs, F, 4, L, [0.5, 0.35, 0.65, 0.2, 0.8], sdir(scale(-1, t)))));
-    });
 
     // Scaled normals u_i A_i of the relaxed constraints.
     (vecsOn ? R : []).forEach(i => {
@@ -1176,9 +1135,9 @@
            fixedAt(k.labelAt, k.anchor));
     });
     want([["X", "it"], ["LP", "sub"]], { "font-size": 22, "data-lab": "X_LP" }, () => [px(XLP_LABEL)]);
-    want([["c", "it"]], { "data-lab": "c" }, L => beside(O, C, 4, L));
+    want([[vecStr(C), ""]], { "data-lab": "c", style: "fill:var(--c)" }, L => beside(O, C, 4, L));
     if (Math.hypot(cu[0] - C[0], cu[1] - C[1]) > 0.08 * UNIT) {
-      want([["c", "it"], ...R.flatMap(i => [[" + ", ""], ["u", "it"], [String(i + 1), "it-sub"], ...vecParts(i)])], { "data-lab": "res" },
+      want([[vecStr(C), ""], ...R.flatMap(i => [[" + ", ""], ["u", "it"], [String(i + 1), "it-sub"], ...vecParts(i)])], { "data-lab": "res" },
            L => beside(O, tip, 5, L));
     }
     // Normal labels: past the arrow tip, else beside the arrow.
@@ -1187,7 +1146,6 @@
       want([["u", "it"], [String(i + 1), "it-sub"], ...vecParts(i)], { class: "small", "data-lab": "n" + (i + 1) },
            L => [...around(tipN, 5, L, sdir(k.a), 5), ...beside(k.foot, tipN, 4, L).map((c, n) => [...c, 15 + 3 * n])]);
     });
-    boxLabels.forEach(f => f());
     // Coordinates of x(u): only while hovering the point (queued last, so they never push other labels).
     want([["(", ""], [fmt(xs[0]), ""], [", ", ""], [fmt(xs[1]), ""], [")", ""]], { class: "small", "data-lab": "hover-xs" },
          L => around(xs, 9, L, sdir([xs[0] - cen[0], xs[1] - cen[1]])));
@@ -1208,7 +1166,7 @@
     // Both penalty terms and both constraints are always shown, in their constraint's colour; the inactive
     // one of each pair (penalty of a kept constraint, constraint that is relaxed) is dimmed and struck through.
     const inact = on => (on ? "" : " inactive");
-    const obj = [[`<b class="cobj">${fmt(xc)}</b>`, `<i>c</i><sup>T</sup>${xHtml}`, "cobj"]];
+    const obj = [[`<b class="cobj">${fmt(xc)}</b>`, partsHtml(termParts(C)), "cobj"]];
     [0, 1].forEach(i => {
       // A kept constraint's term: values hidden, expression dimmed and struck through.
       const n = `n${i + 1}`, on = R.includes(i), hid = on ? "" : " hid", ex = `${n}${inact(on)}`;
@@ -1219,7 +1177,7 @@
                [`<span class="${n}${hid}">${v < -5e-3 ? `(${vs})` : vs}</span>`, `(${slackHtml(i + 1)})`, ex]);
     });
     const stRows = [...[0, 1].map(i => [consHtml(i), ` n${i + 1}${inact(K.includes(i))}`]),
-                    [[xHtml, "&nbsp;∈&nbsp;", "<i>X</i><sub>LP</sub>"], ""]];
+                    [["", "", xHtml, "&nbsp;∈&nbsp;", "<i>X</i><sub>LP</sub>"], ""]];
     const relaxBox = i => `<label class="relax"><input type="checkbox" class="relax${i + 1}" data-i="${i}"` +
       `${R.includes(i) ? " checked" : ""}> Relax</label>`;
     formula.innerHTML = `<div class="f">${fRow(lhs, stk([["&nbsp;", `<span class="under"><span>min</span><i>x</i></span>`]]), stk(obj))}` +
@@ -1290,12 +1248,14 @@
       return [lo - pad, hi + pad];
     };
     const [l0, h0] = span(0), [l1, h1] = one ? [0, 0] : span(1);
-    const X0 = one ? 110 : 200, X1 = one ? 560 : 520, Y0 = 14, Y1 = SH - 18;
+    // Axis labels: the component g_i(x) = A_i^T x - b_i of the subgradient that each axis measures.
+    const slackParts = i => [["g", "it"], [String(i + 1), "sub"], ["(", ""], ["x", "it"], [") = ", ""], ...consParts(i, "slack")];
+    // The horizontal axis's label goes right of X1 + 38: narrow the plot so that it fits (textWidth is rough).
+    const X0 = one ? 110 : 200, X1 = Math.min(one ? 560 : 520, SW - 46 - 1.15 * textWidth(slackParts(R[0]), 17)), Y0 = 14, Y1 = SH - 18;
     const k = one ? (X1 - X0) / (h0 - l0) : Math.min((X1 - X0) / (h0 - l0), (Y1 - Y0) / (h1 - l1));
     const ox = (X0 + X1) / 2 - k * (l0 + h0) / 2, oy = one ? 30 : (Y0 + Y1) / 2 + k * (l1 + h1) / 2;
     const gp = g => [ox + k * g[0], one ? oy : oy - k * g[1]];
     const ptsG = list => list.map(g => gp(g).map(v => v.toFixed(1)).join(",")).join(" ");
-    const slackParts = i => consParts(i, "slack");
     const seg = (a, b, stroke, w, extra = {}) => {
       const e = el("line", { x1: a[0], y1: a[1], x2: b[0], y2: b[1], "stroke-width": w, "stroke-linecap": "round", ...extra }, ssvg);
       e.style.stroke = stroke;
@@ -1311,7 +1271,9 @@
       seg([X0 - 30, zy], [X1 + 30, zy], "var(--axis)", 1.2);
       seg([zx, Y0 - 6], [zx, Y1 + 6], "var(--axis)", 1.2);
       labelPx(X1 + 38, zy + 5, slackParts(R[0]), { style: `fill:var(${NCOL[R[0]]})` }, ssvg);
-      labelPx(zx - 10, Y0 + 6, slackParts(R[1]), { "text-anchor": "end", style: `fill:var(${NCOL[R[1]]})` }, ssvg);
+      // Left of the vertical axis, or right of it when there is no room on the left.
+      const left = zx - 10 >= 4 + 1.15 * textWidth(slackParts(R[1]), 17);
+      labelPx(left ? zx - 10 : zx + 10, Y0 + 6, slackParts(R[1]), { "text-anchor": left ? "end" : "start", style: `fill:var(${NCOL[R[1]]})` }, ssvg);
     }
     // g over the whole domain (light), and the subdifferential (dark).
     if (one) {
@@ -1327,8 +1289,12 @@
         d.style.fill = "var(--fg)"; d.style.stroke = "var(--fg)";
       } else if (gs.length === 2) seg(gp(gs[0]), gp(gs[1]), "var(--fg)", 7, { "stroke-opacity": 0.4 });
     }
-    // Extreme points (coloured as in the figure), the origin, and g(x(u)).
+    // Extreme points (coloured as in the figure), the origin, and g(x(u)). Only those that are optimal for
+    // some u in the slider range (on more than a measure-zero set): g(x(u)) would jump over the others.
+    const ever = new Set(one ? sweep(P.map(p => p.cv), P.map(p => p.d[R[0]])).map(o => o.j)
+                             : faces3d(R, P, [+sliders[0].max, +sliders[1].max]).faces.map(f => f.j));
     G.forEach((g, j) => {
+      if (!ever.has(j)) return;
       const [x, y] = gp(g);
       el("circle", { cx: x, cy: y, r: 4.5, "stroke-width": 1.5 }, ssvg).style.cssText = `fill:${VCOL(j)};stroke:var(--bg)`;
     });
@@ -1356,10 +1322,7 @@
     const DRAG = ", which moves as <i>x</i>(<i>u</i>) is dragged in the figure; drag it here to move <i>x</i>(<i>u</i>).";
     const OPT0 = " <i>u</i> is optimal: some subgradient has <i>g</i><sub><i>i</i></sub> ≤ 0 where <i>u</i><sub><i>i</i></sub> = 0 and <i>g</i><sub><i>i</i></sub> = 0 where <i>u</i><sub><i>i</i></sub> &gt; 0.";
     const cap = (drag, opt) =>
-      `Subgradients <i>g</i>(<i>x</i>) = ${one ? "" : "("}${R.map(i => slackHtml(i + 1)).join(", ")}${one ? "" : ")"}. ` +
-      `Light: <i>g</i>(<i>x</i>) for every feasible <i>x</i> of the subproblem (dots: its extreme points). ` +
-      `Dark: the subdifferential ∂<i>h</i><sub>LP</sub>(<i>u</i>), <i>g</i> of the optimal <i>x</i>; black: <i>g</i>(<i>x</i>(<i>u</i>))` +
-      (drag ? DRAG : ".") + opt;
+      `Subgradient for current <i>x</i> shown with a dot. Full subdifferential for current <i>u</i> in shaded region if it contains more than subgradient. `;
     const opt = !isOpt ? "" : R.every(i => u[i] > 1e-12) ? " Since 0 ∈ ∂<i>h</i><sub>LP</sub>(<i>u</i>), <i>u</i> is optimal." : OPT0;
     scap.innerHTML = `<span class="hid" aria-hidden="true">${cap(true, OPT0)}</span><span>${cap(gs.length >= 2, opt)}</span>`;
   }
@@ -1509,9 +1472,13 @@
     labelPx(top.x, top.y - 8, [["h", "it"], ["LP", "sub"], [` ${fmt(hi)}`, ""]], { "text-anchor": "middle", class: "small" }, dsvg);
 
     dcap.innerHTML =
-      `3D graph of <i>h</i><sub>LP</sub>(<i>u</i>); each face corresponds to one optimal extreme point. ` +
-      `Level curves for <i>h</i><sub>LP</sub> shown at every ${fmt(F.step)}. Drag the point to set <i>u</i>; drag elsewhere to rotate. ` +
-      `The gray plane is a supporting plane, with gradient <i>g</i>(<i>x</i>(<i>u</i>)).`;
+      `<ul><li>Each face corresponds to the extreme point with the same color; level curves at every ${fmt(F.step)}.</li>` +
+      `<li>Drag the point to set <i>u</i>; drag elsewhere to rotate.</li>` +
+      `<li>The gray plane is a supporting plane with gradient <i>g</i>(<i>x</i>(<i>u</i>)); on an edge or corner ` +
+      `there are multiple subgradients, and the plane tilts as <i>g</i>(<i>x</i>(<i>u</i>)) is dragged below.</li>` +
+      `<li>Optimality requires complementarity; some <i>g</i> &isin; &part;<i>h</i><sub>LP</sub>(<i>u</i>) has, for each <i>i</i>, either` +
+      `<ol><li><i>u</i><sub><i>i</i></sub> = 0 and <i>g</i><sub><i>i</i></sub> &le; 0, or</li>` +
+      `<li><i>u</i><sub><i>i</i></sub> &gt; 0 and <i>g</i><sub><i>i</i></sub> = 0.</li></ol></li></ul>`;
   }
 
   // One relaxed constraint: one line per extreme point, h_LP is their lower envelope.
@@ -1575,11 +1542,11 @@
       setU(i, o ? o[0] : clamp(U * (x - X0) / (X1 - X0), 0, U), !!o);
     };
     dcap.innerHTML =
-      `Each line corresponds to the extreme point with the same color.<br>` +
-      `Subdifferential in shaded white; a line when only one subgradient exists, a fan when multiple exist.<br>` +
-      `Optimality requires complementarity; either<br>` +
+      `<ul><li>Each line corresponds to the extreme point with the same color.</li>` +
+      `<li>Subdifferential in shaded white; a line when only one subgradient exists, a fan when multiple exist.</li>` +
+      `<li>Optimality requires complementarity; either` +
       `<ol><li><i>u</i><sub>${i + 1}</sub> = 0 and some subgradient is &le; 0, or</li>` +
-      `<li><i>u</i><sub>${i + 1}</sub> &gt; 0 and 0 &isin; &part;<i>h</i><sub>LP</sub>(<i>u</i>).</li></ol>`;
+      `<li><i>u</i><sub>${i + 1}</sub> &gt; 0 and 0 &isin; &part;<i>h</i><sub>LP</sub>(<i>u</i>).</li></ol></li></ul>`;
   }
 
   // Both relaxed: map over (u_1, u_2), coloured by the optimal extreme point, with level curves of h_LP.
@@ -1686,7 +1653,7 @@
     if (!pick) return;
     const p = toPanel(e);
     pick(p.x, p.y);
-    render();
+    uChanged();
   }
   let dragging = false, rotating = null, moving3d = false;
   const nearPoint3d = p => grab3d && Math.hypot(p.x - grab3d.x, p.y - grab3d.y) < 14;
@@ -1710,7 +1677,7 @@
       const p = toPanel(e), r = grab3d && grab3d.toU(p.x, p.y);
       if (r) {
         r.w.forEach((v, n) => setU(n, v, r.exact));
-        render();
+        uChanged();
       }
     } else if (rotating) {
       view3d.az += 0.01 * (e.clientX - rotating[0]);
@@ -1801,8 +1768,10 @@
     r.checked = r.value === mapMode;
     r.addEventListener("change", () => { if (r.checked) { mapMode = r.value; render(); } });
   });
-  sliders.forEach(s => s.addEventListener("input", render));
-  [optVectors, optBoxes, optFit].forEach(o => o.addEventListener("change", render));
+  sliders.forEach(s => s.addEventListener("input", uChanged));
+  reevalBtn.addEventListener("click", () => { uAt = null; render(); });
+  optImmediate.addEventListener("change", () => { uAt = null; render(); });
+  [optVectors, optFit].forEach(o => o.addEventListener("change", render));
   const optLayout = document.getElementById("optLayout"), page = document.getElementById("page");
   const applyLayout = () => ["auto", "horizontal"].forEach(c => page.classList.toggle(c, optLayout.value === c));
   optLayout.addEventListener("change", applyLayout);
@@ -1853,7 +1822,7 @@
     g.label.classList.toggle("off", off);
     g.label.querySelector("input").disabled = off;
   });
-  [optVectors, optBoxes].forEach(o => o.addEventListener("change", syncLabelGroups));
+  optVectors.addEventListener("change", syncLabelGroups);
   syncLabelGroups();
   svg.addEventListener("pointerover", e => {
     if (tieDrag) return;                                   // keep x(u)'s label while it is dragged
@@ -1944,6 +1913,7 @@
     if (i === undefined) return;
     boxes[+i].checked = e.target.checked;
     if (e.target.checked) { sliders[+i].step = "0.01"; sliders[+i].value = "0"; }   // a newly relaxed constraint starts at u_i = 0
+    uAt = null;                                                      // a new subproblem: solved at the sliders
     render();
   });
   // Choice of LP. Switching keeps which constraints are relaxed but starts the prices at 0; the choice
@@ -1967,7 +1937,7 @@
     useLP(n);
     markLP();
     sliders.forEach(s => { s.step = "0.01"; s.value = "0"; });
-    tieKey = null; tieShape = null; lastSlot.clear();
+    tieKey = null; tieShape = null; lastSlot.clear(); uAt = null;
     const q = new URLSearchParams(location.search);
     q.set("lp", n === "custom" ? "custom" : String(n + 1));
     if (customLP) q.set("lpdef", specParam(customLP.spec));
