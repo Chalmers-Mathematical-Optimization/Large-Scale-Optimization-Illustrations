@@ -133,6 +133,19 @@
   .options select { padding: 2px 6px; border: 1px solid var(--grid); border-radius: 6px; background: var(--bg);
                     color: var(--fg); font: inherit; cursor: pointer; }
   .options select:hover { border-color: var(--axis); }
+  /* "?" beside an option: its note shows while hovering, or stays open after a click (until a click elsewhere) */
+  .options .opt { display: inline-flex; align-items: center; margin-right: 20px; }
+  .options .opt > label { margin-right: 6px; }
+  .help { position: relative; display: inline-flex; margin-top: 6px; }
+  .help > button { box-sizing: border-box; width: 18px; height: 18px; padding: 0; border: 1px solid var(--axis);
+                   border-radius: 50%; color: var(--muted); font-size: 12px; line-height: 1; }
+  .help > button:hover, .help.open > button { color: var(--fg); border-color: var(--fg); }
+  .help .pop { display: none; position: absolute; z-index: 2; left: 50%; top: calc(100% + 6px); transform: translateX(-50%);
+               width: max-content; max-width: min(280px, 80vw); padding: 8px 10px; border: 1px solid var(--axis);
+               border-radius: 6px; background: var(--bg); color: var(--fg); font-size: 0.9rem; line-height: 1.45;
+               box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15); }
+  .help:hover .pop, .help.open .pop { display: block; }
+  .help .pop i { font-family: var(--text-font); }
   /* Slider of a constraint that is not relaxed: greyed out */
   .controls.off label[for], .controls.off .uval, .controls.off input[type=range] { opacity: 0.4; }
   .controls input[type=range]:disabled { cursor: not-allowed; }
@@ -194,8 +207,15 @@
   <details class="options">
     <summary>Options</summary>
     <label><input type="checkbox" id="optVectors" checked> Penalty vectors</label>
-    <label><input type="checkbox" id="optBoxes"> Penalty boxes</label>
-    <label><input type="checkbox" id="optFit"> Fit graph</label>
+    <span class="opt"><label><input type="checkbox" id="optBoxes"> Penalty boxes</label><span class="help">
+      <button type="button" aria-label="About penalty boxes" aria-describedby="boxesHelp">?</button>
+      <span class="pop" id="boxesHelp" role="tooltip">Shows boxes whose areas correspond to the penalty term(s).<br>
+        <i>Note:</i> This is not a common visualization, and is not used elsewhere in the course.</span>
+    </span></span>
+    <span class="opt"><label><input type="checkbox" id="optFit"> Fit graph</label><span class="help">
+      <button type="button" aria-label="About fit graph" aria-describedby="fitHelp">?</button>
+      <span class="pop" id="fitHelp" role="tooltip">Scales the graph so all elements are visible.</span>
+    </span></span>
     <label>Layout <select id="optLayout">
       <option value="auto">Auto</option>
       <option value="vertical">Vertical</option>
@@ -1545,6 +1565,19 @@
   const optLayout = document.getElementById("optLayout"), page = document.getElementById("page");
   const applyLayout = () => ["auto", "horizontal"].forEach(c => page.classList.toggle(c, optLayout.value === c));
   optLayout.addEventListener("change", applyLayout);
+  // Shift an opened note sideways so it stays inside the window
+  const placeHelp = h => {
+    const pop = h.querySelector(".pop");
+    pop.style.transform = "";
+    const r = pop.getBoundingClientRect(), m = 8;
+    const dx = Math.max(m - r.left, Math.min(0, innerWidth - m - r.right));
+    if (dx) pop.style.transform = `translateX(calc(-50% + ${dx}px))`;
+  };
+  document.querySelectorAll(".help").forEach(h => {
+    h.addEventListener("mouseenter", () => placeHelp(h));
+    h.querySelector("button").addEventListener("click", () => { h.classList.toggle("open"); placeHelp(h); });
+  });
+  document.addEventListener("click", e => document.querySelectorAll(".help.open").forEach(h => { if (!h.contains(e.target)) h.classList.remove("open"); }));
   // Labels: each label (data-lab) shows while the pointer is over an object with its key in data-hl, or
   // when pinned. Clicking an object (or its label while shown by hovering it) pins its labels, clicking
   // a pinned label unpins it. "Show all labels" /
