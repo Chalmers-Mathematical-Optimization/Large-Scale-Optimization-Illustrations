@@ -32,8 +32,9 @@
   Optional URL parameters: lp=1 | 2 | custom (which LP, as in the buttons at the top; default 1),
   lpdef=<custom LP> (as made with "Edit LP": c1,c2|a1,a2,le|ge,b|a1,a2,le|ge,b|p1,p2|p1,p2|..., see specParam), u1, u2 (initial prices; u sets both), relax=12 | 1 | 2 | none
   (default: none, or the constraints whose price is given),
-  dual=0 (hide the dual-function panel), labels=1 (start with all of the figure's labels shown;
-  by default a label appears while hovering over its object), theme=auto | light | dark (as in the Theme dropdown; auto, the default, follows the system setting;
+  dual=0 (hide the dual-function panel), labels=1 (start with all of the figure's labels shown,
+  except the coordinates of x(u); or a comma-separated list of label groups: points, constraints, xlp,
+  objective, vectors, boxes, axes, coords; by default a label appears while hovering over its object), theme=auto | light | dark (as in the Theme dropdown; auto, the default, follows the system setting;
   e.g. theme=light to force light mode inside Canvas), layout=auto | vertical | horizontal (dual-function panel below the figure,
   or beside it; auto, the default, puts it beside the figure when the window is wide enough; side=1 is
   an alias for horizontal), map=3d | vertex | value (3-D graph, the default; or a 2-D map coloured by optimal extreme point or by the value of h_LP).
@@ -96,6 +97,7 @@
   .lpchoice button[aria-pressed="true"] { border-color: var(--xlp-stroke); background: var(--xlp-fill); }
   .lpchoice .caret { display: inline-block; margin-left: 4px; font-size: 0.8em; transition: transform 0.15s; }
   .lpchoice button[aria-expanded="true"] .caret { transform: rotate(180deg); }
+  .lpchoice .optbtn { margin-left: 10px; }
   /* "Edit LP": a form with the LP's numbers */
   .lpeditor { margin: 4px 0 8px; padding: 8px 10px; border: 1px solid var(--grid); border-radius: 6px; font-size: 0.95rem; }
   .lpeditor[hidden] { display: none; }
@@ -158,11 +160,13 @@
   .tick .star { color: var(--fg); font-size: 13px; }
   .controls.off .ticks { display: none; }
   .dual[hidden] { display: none; }
-  /* Separated from the sliders below by space and a thin rule */
-  .options { margin: 4px 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--grid); font-size: 0.95rem; }
-  .options summary { cursor: pointer; color: var(--muted); }
+  /* Options: under the buttons at the top, opened and closed by the "Options" button */
+  .options { margin: 4px 0 8px; padding: 2px 10px 8px; border: 1px solid var(--grid); border-radius: 6px; font-size: 0.95rem; }
+  .options[hidden] { display: none; }
   .options label { display: inline-flex; align-items: center; gap: 6px; margin: 6px 20px 0 0; cursor: pointer; }
-  .options .btns { display: flex; gap: 8px; margin-top: 8px; }
+  .options .labs { margin-top: 4px; color: var(--muted); }
+  .options .labs label { color: var(--fg); margin-left: 10px; margin-right: 0; }
+  .options .labs label.off { opacity: 0.4; cursor: not-allowed; }
   .options button { padding: 3px 10px; border: 1px solid var(--grid); border-radius: 6px; background: var(--bg);
                     color: var(--fg); font: inherit; cursor: pointer; }
   .options button:hover { border-color: var(--axis); }
@@ -209,13 +213,13 @@
   /* the choice of LP and the written-out LP across both columns, centred on the page */
   .wrap.horizontal > .top { grid-column: 1 / -1; }
   .wrap.horizontal .lpchoice { margin: 2px 76px 4px; justify-content: center; }
-  .wrap.horizontal .lpeditor { max-width: 720px; margin: 4px auto 8px; }
+  .wrap.horizontal .lpeditor, .wrap.horizontal .options { max-width: 720px; margin: 4px auto 8px; }
   @media (min-width: 1000px) {
     .wrap.auto { max-width: 1520px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 28px; }
     .wrap.auto > .dual { align-self: center; margin-top: 0; border-top: 0; padding-top: 0; }
     .wrap.auto > .top { grid-column: 1 / -1; }
     .wrap.auto .lpchoice { margin: 2px 76px 4px; justify-content: center; }
-    .wrap.auto .lpeditor { max-width: 720px; margin: 4px auto 8px; }
+    .wrap.auto .lpeditor, .wrap.auto .options { max-width: 720px; margin: 4px auto 8px; }
   }
   #dualfig { touch-action: none; cursor: crosshair; }
   #dualfig.rotate { cursor: grab; }
@@ -226,6 +230,11 @@
   .mapmode[hidden] { display: none; }
   #subfig { margin-top: 14px; }
   .dualcap { font-size: 0.9rem; color: var(--muted); text-align: center; line-height: 1.6; margin: 4px 8px 0; }
+  .dualcap ol { display: inline-block; text-align: left; margin: 0; padding-left: 1.6em; }
+  /* The subgradient caption over a hidden copy of its longest version, so its height doesn't change with u */
+  #subcap { display: grid; }
+  #subcap > span { grid-area: 1 / 1; }
+  #subcap > .hid { visibility: hidden; }
 </style>
 </head>
 <body>
@@ -236,20 +245,9 @@
   </div>
   <div class="top">
   <div class="lpchoice" id="lpChoice" role="group" aria-label="LP">
-    <button type="button" id="lpCustom" aria-expanded="false" aria-controls="lpEditor">Custom<span class="caret" aria-hidden="true">▾</span></button></div>
-  <div class="lpeditor" id="lpEditor" hidden>
-    <div class="lpform" id="lpForm"></div>
-    <div class="lppts" id="lpPts"><span class="op"><i>X</i><sub>LP</sub> = conv</span>
-      <button type="button" id="lpAddPt" class="add" title="Add a point" aria-label="Add a point">+</button></div>
-    <div class="lpbtns"><button type="button" id="lpApply">Apply</button><button type="button" id="lpClose">Close</button>
-      <span class="lperror" id="lpError" role="alert"></span></div>
-  </div>
-  <div class="formula" id="formula"></div>
-  </div>
-  <div class="main">
-  <svg id="fig" viewBox="0 0 720 600" role="img" aria-label="Polyhedron X_LP cut by two constraints, with the objective vector, the scaled constraint normals and the resulting Lagrangean objective direction."></svg>
-  <details class="options">
-    <summary>Options</summary>
+    <button type="button" id="lpCustom" aria-expanded="false" aria-controls="lpEditor">Custom<span class="caret" aria-hidden="true">▾</span></button>
+    <button type="button" id="optToggle" class="optbtn" aria-expanded="false" aria-controls="optPanel">Options<span class="caret" aria-hidden="true">▾</span></button></div>
+  <div class="options" id="optPanel" hidden>
     <label><input type="checkbox" id="optVectors" checked> Penalty vectors</label>
     <span class="opt"><label><input type="checkbox" id="optBoxes"> Penalty boxes</label><span class="help">
       <button type="button" aria-label="About penalty boxes" aria-describedby="boxesHelp">?</button>
@@ -270,11 +268,19 @@
       <option value="light">Light</option>
       <option value="dark">Dark</option>
     </select></label>
-    <div class="btns">
-      <button type="button" id="showLabels">Show all labels</button>
-      <button type="button" id="hideLabels">Hide all labels</button>
-    </div>
-  </details>
+    <div class="labs" id="labelGroups">Labels:</div>
+  </div>
+  <div class="lpeditor" id="lpEditor" hidden>
+    <div class="lpform" id="lpForm"></div>
+    <div class="lppts" id="lpPts"><span class="op"><i>X</i><sub>LP</sub> = conv</span>
+      <button type="button" id="lpAddPt" class="add" title="Add a point" aria-label="Add a point">+</button></div>
+    <div class="lpbtns"><button type="button" id="lpApply">Apply</button><button type="button" id="lpClose">Close</button>
+      <span class="lperror" id="lpError" role="alert"></span></div>
+  </div>
+  <div class="formula" id="formula"></div>
+  </div>
+  <div class="main">
+  <svg id="fig" viewBox="0 0 720 600" role="img" aria-label="Polyhedron X_LP cut by two constraints, with the objective vector, the scaled constraint normals and the resulting Lagrangean objective direction."></svg>
   <div class="controls" id="row1">
     <label for="u1"><i>u</i><sub>1</sub></label>
     <span class="track"><input id="u1" type="range" min="0" max="2.5" step="0.01" value="0"><span class="ticks" id="ticks1"></span></span>
@@ -317,7 +323,7 @@
   //   XLP_LABEL, XLP_OPT_LABEL and labelAt may be left out (as for a custom LP): autoLabels() picks them.
   const LPS = [
     {
-      name: "Optimum in the interior of X_LP",
+      name: "Optimum in the interior of <i>X</i><sub>LP</sub>",
       XLP: [[1, 1], [7, 0.8], [9.2, 3], [8.5, 6.5], [5, 7.6], [1.5, 6]],
       C: [-2, -1.2],
       XLP_LABEL: [7.8, 5.6],
@@ -330,7 +336,7 @@
     {
       // x*_LP is where constraint 1 crosses the top edge of X_LP. -c is outside cone(A_1, A_2), so no u >= 0
       // has c + u_1 A_1 + u_2 A_2 = 0: the pieces of h_LP (both relaxed) don't all meet in one point.
-      name: "Optimum on the boundary of X_LP",
+      name: "Optimum on the boundary of <i>X</i><sub>LP</sub>",
       XLP: [[1, 1], [7, 0.8], [9.2, 3], [8.5, 6.5], [5, 7.6], [1.5, 6]],
       C: [-2, -1.2],
       XLP_LABEL: [8.4, 4.4],
@@ -549,14 +555,28 @@
     const hasSub = parts.some(([, st]) => st.includes("sub")), hasSup = parts.some(([, st]) => st === "sup");
     const L = { parts, attrs, fs, w: textWidth(parts, fs), h: fs * (0.95 + (hasSub ? 0.2 : 0) + (hasSup ? 0.15 : 0)) };
     // Unless all labels are shown, labels mostly show on hover, so an optional one is placed if it can be.
-    L.cands = cands(L); L.accept = accept; L.maxCost = allShown ? maxCost : Infinity;
+    L.cands = cands(L); L.accept = accept; L.maxCost = attrs["data-lab"] && groupShown(attrs["data-lab"]) ? maxCost : Infinity;
     scene.queue.push(L);
   }
   // Stickiness: each label remembers the candidate slot it used last time and keeps it unless another
   // slot is better by more than STICK (so labels don't jump around while something is being dragged).
   // An optional label that was shown stays shown until its cost exceeds twice its maxCost.
   const STICK = 80, lastSlot = new Map();
-  let labelEls = [], allShown = false;          // labels placed in the last render; see "Labels" below
+  // Groups of labels, each shown or not by its checkbox under "Labels" in the options (see "Labels" below).
+  const LABEL_GROUPS = [
+    { id: "points", name: "Points", keys: ["xs", "xlp"] },
+    { id: "constraints", name: "Constraints", keys: ["k1", "k2"] },
+    { id: "xlp", name: "<i>X</i><sub>LP</sub>", keys: ["X_LP"] },
+    { id: "objective", name: "Objective", keys: ["c", "res"] },
+    { id: "vectors", name: "Penalty vectors", keys: ["n1", "n2"], needs: "optVectors" },   // greyed out while that option is off
+    { id: "boxes", name: "Penalty boxes", keys: ["side1", "side2", "area1", "area2", "dist1", "dist2"], needs: "optBoxes" },
+    { id: "axes", name: "Axes", keys: ["ax1", "ax2"] },
+    { id: "coords", name: "Coordinates of <i>x</i>(<i>u</i>)", keys: ["hover-xs"] },
+  ];
+  const groupOfKey = new Map(LABEL_GROUPS.flatMap(g => g.keys.map(k => [k, g.id])));
+  const shownGroups = new Set();
+  const groupShown = k => shownGroups.has(groupOfKey.get(k));
+  let labelEls = [];                            // labels placed in the last render
   function placeLabels(parent) {
     labelEls = [];
     const used = new Map();
@@ -1301,14 +1321,15 @@
     const wOf = o => { const w = [0, 0]; R.forEach((i, n) => { w[i] = o[n]; }); return w; };
     const top = curOpt.length ? Math.max(...curOpt.map(o => evalDual(P, R, wOf(o)).h)) : Infinity;
     const isOpt = h >= top - 1e-9 * (1 + Math.abs(top));
-    scap.innerHTML =
+    const DRAG = ", which moves as <i>x</i>(<i>u</i>) is dragged in the figure; drag it here to move <i>x</i>(<i>u</i>).";
+    const OPT0 = " <i>u</i> is optimal: some subgradient has <i>g</i><sub><i>i</i></sub> ≤ 0 where <i>u</i><sub><i>i</i></sub> = 0 and <i>g</i><sub><i>i</i></sub> = 0 where <i>u</i><sub><i>i</i></sub> &gt; 0.";
+    const cap = (drag, opt) =>
       `Subgradients <i>g</i>(<i>x</i>) = (<i>A</i><sub><i>i</i></sub><sup>T</sup><i>x</i> − <i>b</i><sub><i>i</i></sub>)<sub><i>i</i> relaxed</sub>. ` +
       `Light: <i>g</i>(<i>x</i>) for every feasible <i>x</i> of the subproblem (dots: its extreme points). ` +
       `Dark: the subdifferential ∂<i>h</i><sub>LP</sub>(<i>u</i>), <i>g</i> of the optimal <i>x</i>; black: <i>g</i>(<i>x</i>(<i>u</i>))` +
-      (gs.length >= 2 ? ", which moves as <i>x</i>(<i>u</i>) is dragged in the figure; drag it here to move <i>x</i>(<i>u</i>)." : ".") +
-      (!isOpt ? "" : R.every(i => u[i] > 1e-12)
-        ? " Since 0 ∈ ∂<i>h</i><sub>LP</sub>(<i>u</i>), <i>u</i> is optimal."
-        : " <i>u</i> is optimal: some subgradient has <i>g</i><sub><i>i</i></sub> ≤ 0 where <i>u</i><sub><i>i</i></sub> = 0 and <i>g</i><sub><i>i</i></sub> = 0 where <i>u</i><sub><i>i</i></sub> &gt; 0.");
+      (drag ? DRAG : ".") + opt;
+    const opt = !isOpt ? "" : R.every(i => u[i] > 1e-12) ? " Since 0 ∈ ∂<i>h</i><sub>LP</sub>(<i>u</i>), <i>u</i> is optimal." : OPT0;
+    scap.innerHTML = `<span class="hid" aria-hidden="true">${cap(true, OPT0)}</span><span>${cap(gs.length >= 2, opt)}</span>`;
   }
 
   // ---- 3-D graph of h_LP over (u_1, u_2), rotated by dragging.
@@ -1490,22 +1511,19 @@
     const zl = el("line", { x1: X0, y1: sy(zLP), x2: X1, y2: sy(zLP), "stroke-width": 1.4, "stroke-dasharray": "6 4" }, g);
     zl.style.stroke = "var(--muted)";
     P.forEach((p, j) => {
+      const on = sub.verts.includes(j);                            // active at u: both lines at a kink
       const e = el("line", { x1: sx(0), y1: sy(p.cv), x2: sx(U), y2: sy(p.cv + U * p.d[i]),
-                             "stroke-width": j === best ? 3.2 : 1.4, "stroke-opacity": j === best ? 1 : 0.75 }, g);
+                             "stroke-width": on ? 3.2 : 1.4, "stroke-opacity": on ? 1 : 0.75 }, g);
       e.style.stroke = VCOL(j);
     });
-    const envPts = env.map((v, s) => `${sx(U * s / N).toFixed(1)},${sy(v).toFixed(1)}`).join(" ");
-    const pl = el("polyline", { points: envPts, fill: "none", "stroke-width": 2, "stroke-linejoin": "round" }, g);
-    pl.style.stroke = "var(--fg)";
     // Supporting lines at u: their slopes are the subgradients, a fan at a kink (shaded); the one with
     // slope g(x(u)) is drawn, and tilts as x(u) is dragged along the optimal edge.
-    const sl = sub.verts.map(j => P[j].d[i]), s0 = Math.min(...sl), s1 = Math.max(...sl), D = 0.3 * U, Df = 0.1 * U;
+    const sl = sub.verts.map(j => P[j].d[i]), s0 = Math.min(...sl), s1 = Math.max(...sl), D = 0.06 * U;
     const at = (w, s) => [sx(w), sy(h + s * (w - u[i]))].map(v => v.toFixed(1)).join(",");
-    if (s1 - s0 > 1e-9) {
-      const fan = el("polygon", { points: [at(u[i], 0), at(u[i] + Df, s1), at(u[i] + Df, s0), at(u[i], 0), at(u[i] - Df, s0), at(u[i] - Df, s1)].join(" "),
-                                  "fill-opacity": 0.15, "stroke-opacity": 0.5, "stroke-width": 1 }, g);
-      fan.style.fill = "var(--fg)"; fan.style.stroke = "var(--fg)";
-    }
+    // Thick outline + fill in one translucent group, so the band is uniform (a thick line with one subgradient).
+    const fan = el("polygon", { points: [at(u[i], 0), at(u[i] + D, s1), at(u[i] + D, s0), at(u[i], 0), at(u[i] - D, s0), at(u[i] - D, s1)].join(" "),
+                                "stroke-width": 10, "stroke-linejoin": "round" }, el("g", { opacity: 0.18 }, g));
+    fan.style.fill = "var(--fg)"; fan.style.stroke = "var(--fg)";
     const [ta, tb] = [at(u[i] - D, sub.g[0]), at(u[i] + D, sub.g[0])].map(s => s.split(","));
     el("line", { x1: ta[0], y1: ta[1], x2: tb[0], y2: tb[1], "stroke-width": 1.6 }, g).style.stroke = "var(--fg)";
     const fr = el("rect", { x: X0, y: Y0, width: X1 - X0, height: Y1 - Y0, fill: "none", "stroke-width": 1 }, dsvg);
@@ -1525,8 +1543,11 @@
       setU(i, o ? o[0] : clamp(U * (x - X0) / (X1 - X0), 0, U), !!o);
     };
     dcap.innerHTML =
-      `Colored lines correspond to optimal extreme points. Set <i>u</i> by clicking. ` +
-      `The black line through the point is a supporting line; at a kink, the shaded fan holds all of them.`;
+      `Each line corresponds to the extreme point with the same color.<br>` +
+      `Subdifferential in shaded white; a line when only one subgradient exists, a fan when multiple exist.<br>` +
+      `Optimality requires complementarity; either<br>` +
+      `<ol><li><i>u</i><sub>${i + 1}</sub> = 0 and some subgradient is &le; 0, or</li>` +
+      `<li><i>u</i><sub>${i + 1}</sub> &gt; 0 and 0 &isin; &part;<i>h</i><sub>LP</sub>(<i>u</i>).</li></ol>`;
   }
 
   // Both relaxed: map over (u_1, u_2), coloured by the optimal extreme point, with level curves of h_LP.
@@ -1768,22 +1789,40 @@
   document.addEventListener("click", e => document.querySelectorAll(".help.open").forEach(h => { if (!h.contains(e.target)) h.classList.remove("open"); }));
   // Labels: each label (data-lab) shows while the pointer is over an object with its key in data-hl, or
   // when pinned. Clicking an object (or its label while shown by hovering it) pins its labels, clicking
-  // a pinned label unpins it. "Show all labels" /
-  // "Hide all labels" set the default for every label and forget the pins. The coordinates of x(u)
-  // (key "hover-xs") only show on hover or when pinned.
+  // a pinned label unpins it. Each group's checkbox under "Labels" sets the default for its labels and
+  // forgets their pins.
   let hoverKeys = [];
-  const pinned = new Map();                                // key -> shown, overriding allShown
-  const shownKey = k => pinned.has(k) ? pinned.get(k) : allShown && !k.startsWith("hover-");
+  const pinned = new Map();                                // key -> shown, overriding its group
+  const shownKey = k => pinned.has(k) ? pinned.get(k) : groupShown(k);
   function applyHover() {
     labelEls.forEach(t => {
       const k = t.getAttribute("data-lab");
       t.classList.toggle("show", hoverKeys.includes(k) || shownKey(k));
     });
   }
-  const setAll = on => { allShown = on; pinned.clear(); render(); };
-  document.getElementById("showLabels").addEventListener("click", () => setAll(true));
-  document.getElementById("hideLabels").addEventListener("click", () => setAll(false));
-  if (params.get("labels") === "1") allShown = true;
+  // ?labels=1: every group but the coordinates; else a comma-separated list of group ids.
+  const labelsParam = params.get("labels");
+  if (labelsParam === "1") LABEL_GROUPS.forEach(g => { if (g.id !== "coords") shownGroups.add(g.id); });
+  else if (labelsParam) labelsParam.split(",").forEach(id => { if (LABEL_GROUPS.some(g => g.id === id)) shownGroups.add(id); });
+  const labelGroups = document.getElementById("labelGroups");
+  LABEL_GROUPS.forEach(g => {
+    const lab = document.createElement("label");
+    lab.innerHTML = `<input type="checkbox"${shownGroups.has(g.id) ? " checked" : ""}> <span>${g.name}</span>`;
+    lab.querySelector("input").addEventListener("change", e => {
+      if (e.target.checked) shownGroups.add(g.id); else shownGroups.delete(g.id);
+      g.keys.forEach(k => pinned.delete(k));
+      render();
+    });
+    labelGroups.appendChild(lab);
+    g.label = lab;
+  });
+  const syncLabelGroups = () => LABEL_GROUPS.filter(g => g.needs).forEach(g => {
+    const off = !document.getElementById(g.needs).checked;
+    g.label.classList.toggle("off", off);
+    g.label.querySelector("input").disabled = off;
+  });
+  [optVectors, optBoxes].forEach(o => o.addEventListener("change", syncLabelGroups));
+  syncLabelGroups();
   svg.addEventListener("pointerover", e => {
     if (tieDrag) return;                                   // keep x(u)'s label while it is dragged
     if (e.target.closest && e.target.closest("text[data-lab]")) return;   // over a shown label: as before
@@ -1882,7 +1921,7 @@
   const lpChoice = document.getElementById("lpChoice"), lpCustom = document.getElementById("lpCustom");
   const lpButtons = LPS.map((lp, n) => {
     const b = document.createElement("button");
-    b.type = "button"; b.textContent = lp.name;
+    b.type = "button"; b.innerHTML = lp.name;
     b.addEventListener("click", () => { if (lpIndex !== n) switchLP(n); });
     lpChoice.insertBefore(b, lpCustom);
     return b;
@@ -1963,6 +2002,12 @@
     else openEditor(specOf(lpIndex === "custom" ? customLP : LPS[lpIndex]));
   });
   document.getElementById("lpClose").addEventListener("click", () => showEditor(false));
+  // "Options" opens and closes the options panel under the buttons.
+  const optToggle = document.getElementById("optToggle"), optPanel = document.getElementById("optPanel");
+  optToggle.addEventListener("click", () => {
+    optPanel.hidden = !optPanel.hidden;
+    optToggle.setAttribute("aria-expanded", String(!optPanel.hidden));
+  });
   document.getElementById("lpAddPt").addEventListener("click", () => addPoint().querySelector("input").focus());
   const applyLP = () => {
     let lp;
