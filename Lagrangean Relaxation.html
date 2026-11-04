@@ -59,6 +59,8 @@
     --neg: #d8343a;
     --opt: #111116;
     --halo: #ffffff;
+    /* outline behind figure labels: in light mode thin and translucent, so dark text doesn't look cut out */
+    --label-halo: rgb(255 255 255 / 0.75); --label-halo-w: 2.5px;
     --star: #f5c518; --star-edge: #111116;
     /* extreme points (dots in the figure, lines/regions in the dual panel) */
     --v0: #e0a030; --v1: #3fa0b0; --v2: #8fb33a; --v3: #c06aa8;
@@ -70,6 +72,7 @@
     --xlp-fill: #1f2a3d; --xlp-stroke: #7d9bd1; --feas-fill: #2f4466; --cons: #b5b5bf;
     --c: #6fa4ff; --n1: #f39a4a; --n2: #b48cf0; --res: #ff6688; --pos: #4fcb87; --neg: #ff6b6b;
     --opt: #ffffff; --halo: #17171b; --star: #a67c00; --star-edge: #ffffff;
+    --label-halo: #17171b; --label-halo-w: 4px;
   }
   html, body { margin: 0; background: var(--bg); color: var(--fg); }
   /* Keep room for the scrollbar, so the page doesn't shift sideways when the dual panel shows or hides */
@@ -140,8 +143,9 @@
   .formula i, svg .it { font-style: italic; }
   svg { width: 100%; height: auto; display: block; user-select: none; }
   svg text { fill: var(--fg); font-size: 17px;
-             paint-order: stroke; stroke: var(--bg); stroke-width: 4px; stroke-linejoin: round; }
+             paint-order: stroke; stroke: var(--label-halo); stroke-width: var(--label-halo-w); stroke-linejoin: round; }
   svg .small { font-size: 14px; fill: var(--muted); }
+  #fig .small { fill: var(--fg); }
   /* A label shows while the pointer is over its object (its hover target) or when pinned; a shown
      label can be clicked to pin it (if shown by hovering) or unpin it (if pinned). */
   #fig text { pointer-events: none; }
@@ -196,6 +200,7 @@
   .formula label.relax input { margin: 0 0.2em 0 0; cursor: pointer; vertical-align: middle; }
   .uval { min-width: 4.5em; font-variant-numeric: tabular-nums; }
   .n1 { color: var(--n1); } .n2 { color: var(--n2); }
+  .cobj, .formula .val b.cobj { color: var(--c); }
   .formula .inactive { opacity: 0.4; text-decoration: line-through; }
   /* Both left-hand sides (h_LP(u) / z_LP) in one cell, only one visible, so the system keeps its size */
   .formula .lhs { display: inline-grid; justify-items: end; }
@@ -460,6 +465,33 @@
     return t;
   }
   const label = (p, parts, attrs, parent) => labelPx(...px(p), parts, attrs, parent);
+  // The same markup as HTML.
+  const partsHtml = parts => parts.map(([s, st]) => {
+    const t = st.includes("it") ? `<i>${s}</i>` : s;
+    return st.includes("sub") ? `<sub>${t}</sub>` : st === "sup" ? `<sup>${t}</sup>` : t;
+  }).join("").replace(/ /g, "&nbsp;");
+
+  // Constraint i with its numbers written out, as label parts: A_i^T x as "x1 − 0.15 x2" (x_j(u) when atU),
+  // A_i^T x <= b_i (rel "le") or A_i^T x - b_i (rel "slack"); A_i as "(1, −0.15)"; ||A_i|| rounded.
+  const numStr = v => String(+(+v).toPrecision(6)).replace("-", "−");
+  function linParts(i, atU) {
+    const parts = [];
+    CONS[i].a.forEach((c, n) => {
+      if (c === 0) return;
+      parts.push([parts.length ? (c < 0 ? " − " : " + ") : c < 0 ? "−" : "", ""]);
+      if (Math.abs(c) !== 1) parts.push([numStr(Math.abs(c)), ""]);
+      parts.push(["x", "it"], [String(n + 1), "sub"]);
+      if (atU) parts.push(["(", ""], ["u", "it"], [")", ""]);
+    });
+    return parts.filter(p => p[0]);
+  }
+  const consParts = (i, rel, atU) => {
+    const b = CONS[i].b;
+    return [...linParts(i, atU), ...(rel === "le" ? [[" ≤ " + numStr(b), ""]]
+                                    : b === 0 ? [] : [[(b < 0 ? " + " : " − ") + numStr(Math.abs(b)), ""]])];
+  };
+  const vecParts = i => [["(" + CONS[i].a.map(numStr).join(", ") + ")", ""]];
+  const normStr = i => numStr(+CONS[i].n.toFixed(2));
 
   // ---------------------------------------------------------------- label placement
   // Everything drawn in the figure registers itself as an obstacle (segments and dots, in px).
@@ -778,7 +810,7 @@
     obstacles();
     CONS.forEach((k, i) => {
       if (k.labelAt) return;
-      const j = String(i + 1), L = size([["A", "it"], [j, "sub"], ["T", "sup"], ["x", "it"], [" ≤ ", ""], ["b", "it"], [j, "sub"]], 17);
+      const j = String(i + 1), L = size(consParts(i, "le"), 17);
       let best = null;
       beside(...lines[i], 6, L, [0.08, 0.92, 0.15, 0.85, 0.25, 0.75, 0.4, 0.6]).forEach(([cx, cy], n) => {
         const b = boxAt(cx, cy, L), c = cost(b) + 3 * n + (inConvex(xlpPx, [cx, cy]) ? 150 : 0);
@@ -848,10 +880,10 @@
   const NCOL = ["--n1", "--n2"];
   const fmt = v => (Math.abs(v) < 5e-3 ? 0 : v).toFixed(2);
   // Constraint as [left side, relation, right side], so the relations line up in the formula.
-  const consHtml = (i, ptHtml) => [`<i>A</i><sub>${i + 1}</sub><sup>T</sup>${ptHtml}`, "&nbsp;≤&nbsp;", `<i>b</i><sub>${i + 1}</sub>`];
-  // A_j^T x - b_j as HTML for the point ptHtml (e.g. x(u)), and A_j^T x(u) - b_j as SVG label parts.
-  const slackHtml = (j, ptHtml) => `<i>A</i><sub>${j}</sub><sup>T</sup>${ptHtml} − <i>b</i><sub>${j}</sub>`;
-  const slack = j => [["A", "it"], [j, "sub"], ["T", "sup"], ["x", "it"], ["(", ""], ["u", "it"], [")", ""], [" − ", ""], ["b", "it"], [j, "sub"]];
+  const consHtml = i => [partsHtml(linParts(i)), "&nbsp;≤&nbsp;", numStr(CONS[i].b)];
+  // A_j^T x - b_j as HTML, and A_j^T x(u) - b_j as SVG label parts (j counts from 1).
+  const slackHtml = j => partsHtml(consParts(j - 1, "slack"));
+  const slack = j => consParts(+j - 1, "slack", true);
   // Six-column layout:  lhs | min / s. t. | expression (objective: one cell; constraint: left, relation,
   // right, each with class cls; the objective also spans the next column) | relax-checkbox (constraint rows only)
   const fRow = (lhs, op, expr, extra = "", cls = "") => `<span class="h">${lhs}</span><span class="op">${op}</span>` +
@@ -1054,7 +1086,7 @@
         });
         // Label the side lying on the constraint line (length u_i ||A_i||), preferably outside the box.
         if (w > 0.3 * UNIT) {
-          boxLabels.push(() => want([["u", "it"], [j, "it-sub"], [" ‖", ""], ["A", "it"], [j, "sub"], ["‖", ""]], { class: "small", "data-lab": "side" + j },
+          boxLabels.push(() => want([[normStr(i) + " ", ""], ["u", "it"], [j, "it-sub"]], { class: "small", "data-lab": "side" + j },
             L => beside(F, add(F, scale(w, t)), 4, L, [0.5, 0.3, 0.7, 0.15, 0.85], sdir(scale(-dist, k.e)))));
         }
         // The area, inside the box if it fits.
@@ -1072,7 +1104,7 @@
       seg.style.stroke = col;
       hitLine([x1, y1], [x2, y2], "dist" + j, dyn);
       obSeg(xs, F, 1.5);
-      boxLabels.push(() => want([["(", ""], ...slack(j), [") / ‖", ""], ["A", "it"], [j, "sub"], ["‖", ""]], { class: "small", "data-lab": "dist" + j },
+      boxLabels.push(() => want([["(", ""], ...slack(j), [") / " + normStr(i), ""]], { class: "small", "data-lab": "dist" + j },
         L => beside(xs, F, 4, L, [0.5, 0.35, 0.65, 0.2, 0.8], sdir(scale(-1, t)))));
     });
 
@@ -1140,19 +1172,19 @@
     CONS.forEach((k, i) => {
       const j = String(i + 1);
       // Fixed spot (labels of fixed objects don't move); the text's outline keeps it legible over lines.
-      want([["A", "it"], [j, "sub"], ["T", "sup"], ["x", "it"], [" ≤ ", ""], ["b", "it"], [j, "sub"]], { "data-lab": "k" + j, style: `fill:var(${NCOL[i]})` },
+      want(consParts(i, "le"), { "data-lab": "k" + j, style: `fill:var(${NCOL[i]})` },
            fixedAt(k.labelAt, k.anchor));
     });
     want([["X", "it"], ["LP", "sub"]], { "font-size": 22, "data-lab": "X_LP" }, () => [px(XLP_LABEL)]);
     want([["c", "it"]], { "data-lab": "c" }, L => beside(O, C, 4, L));
     if (Math.hypot(cu[0] - C[0], cu[1] - C[1]) > 0.08 * UNIT) {
-      want([["c", "it"], ...R.flatMap(i => [[" + ", ""], ["u", "it"], [String(i + 1), "it-sub"], ["A", "it"], [String(i + 1), "sub"]])], { "data-lab": "res" },
+      want([["c", "it"], ...R.flatMap(i => [[" + ", ""], ["u", "it"], [String(i + 1), "it-sub"], ...vecParts(i)])], { "data-lab": "res" },
            L => beside(O, tip, 5, L));
     }
     // Normal labels: past the arrow tip, else beside the arrow.
     R.filter(i => vecsOn && u[i] * CONS[i].n > 0.08 * UNIT).forEach(i => {
       const k = CONS[i], tipN = add(k.foot, scale(u[i], k.a));
-      want([["u", "it"], [String(i + 1), "it-sub"], [" A", "it"], [String(i + 1), "sub"]], { class: "small", "data-lab": "n" + (i + 1) },
+      want([["u", "it"], [String(i + 1), "it-sub"], ...vecParts(i)], { class: "small", "data-lab": "n" + (i + 1) },
            L => [...around(tipN, 5, L, sdir(k.a), 5), ...beside(k.foot, tipN, 4, L).map((c, n) => [...c, 15 + 3 * n])]);
     });
     boxLabels.forEach(f => f());
@@ -1176,7 +1208,7 @@
     // Both penalty terms and both constraints are always shown, in their constraint's colour; the inactive
     // one of each pair (penalty of a kept constraint, constraint that is relaxed) is dimmed and struck through.
     const inact = on => (on ? "" : " inactive");
-    const obj = [[`<b>${fmt(xc)}</b>`, `<i>c</i><sup>T</sup>${xHtml}`]];
+    const obj = [[`<b class="cobj">${fmt(xc)}</b>`, `<i>c</i><sup>T</sup>${xHtml}`, "cobj"]];
     [0, 1].forEach(i => {
       // A kept constraint's term: values hidden, expression dimmed and struck through.
       const n = `n${i + 1}`, on = R.includes(i), hid = on ? "" : " hid", ex = `${n}${inact(on)}`;
@@ -1184,9 +1216,9 @@
       obj.push([`<span class="pl${hid}">+</span>`, "+", `pl ${ex}`],
                [`<span class="${n}${hid}">${fmt(u[i])}</span>`, `<i>u</i><sub>${i + 1}</sub>`, ex],
                [`<span class="${hid}">·</span>`, "&nbsp;", ex],
-               [`<span class="${n}${hid}">${v < -5e-3 ? `(${vs})` : vs}</span>`, `(${slackHtml(i + 1, xHtml)})`, ex]);
+               [`<span class="${n}${hid}">${v < -5e-3 ? `(${vs})` : vs}</span>`, `(${slackHtml(i + 1)})`, ex]);
     });
-    const stRows = [...[0, 1].map(i => [consHtml(i, xHtml), ` n${i + 1}${inact(K.includes(i))}`]),
+    const stRows = [...[0, 1].map(i => [consHtml(i), ` n${i + 1}${inact(K.includes(i))}`]),
                     [[xHtml, "&nbsp;∈&nbsp;", "<i>X</i><sub>LP</sub>"], ""]];
     const relaxBox = i => `<label class="relax"><input type="checkbox" class="relax${i + 1}" data-i="${i}"` +
       `${R.includes(i) ? " checked" : ""}> Relax</label>`;
@@ -1263,7 +1295,7 @@
     const ox = (X0 + X1) / 2 - k * (l0 + h0) / 2, oy = one ? 30 : (Y0 + Y1) / 2 + k * (l1 + h1) / 2;
     const gp = g => [ox + k * g[0], one ? oy : oy - k * g[1]];
     const ptsG = list => list.map(g => gp(g).map(v => v.toFixed(1)).join(",")).join(" ");
-    const slackParts = i => [["A", "it"], [String(i + 1), "sub"], ["T", "sup"], ["x", "it"], [" − ", ""], ["b", "it"], [String(i + 1), "sub"]];
+    const slackParts = i => consParts(i, "slack");
     const seg = (a, b, stroke, w, extra = {}) => {
       const e = el("line", { x1: a[0], y1: a[1], x2: b[0], y2: b[1], "stroke-width": w, "stroke-linecap": "round", ...extra }, ssvg);
       e.style.stroke = stroke;
@@ -1324,7 +1356,7 @@
     const DRAG = ", which moves as <i>x</i>(<i>u</i>) is dragged in the figure; drag it here to move <i>x</i>(<i>u</i>).";
     const OPT0 = " <i>u</i> is optimal: some subgradient has <i>g</i><sub><i>i</i></sub> ≤ 0 where <i>u</i><sub><i>i</i></sub> = 0 and <i>g</i><sub><i>i</i></sub> = 0 where <i>u</i><sub><i>i</i></sub> &gt; 0.";
     const cap = (drag, opt) =>
-      `Subgradients <i>g</i>(<i>x</i>) = (<i>A</i><sub><i>i</i></sub><sup>T</sup><i>x</i> − <i>b</i><sub><i>i</i></sub>)<sub><i>i</i> relaxed</sub>. ` +
+      `Subgradients <i>g</i>(<i>x</i>) = ${one ? "" : "("}${R.map(i => slackHtml(i + 1)).join(", ")}${one ? "" : ")"}. ` +
       `Light: <i>g</i>(<i>x</i>) for every feasible <i>x</i> of the subproblem (dots: its extreme points). ` +
       `Dark: the subdifferential ∂<i>h</i><sub>LP</sub>(<i>u</i>), <i>g</i> of the optimal <i>x</i>; black: <i>g</i>(<i>x</i>(<i>u</i>))` +
       (drag ? DRAG : ".") + opt;
