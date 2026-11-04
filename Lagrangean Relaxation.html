@@ -29,7 +29,7 @@
   or a map over (u_1, u_2) coloured by the optimal extreme point (both relaxed).
 
   Embed with e.g.  <iframe src="lagrangean-relaxation.html?u1=0.8&u2=0.5" width="760" height="1100"></iframe>
-  Optional URL parameters: lp=1 | 2 | custom (which LP, as in the dropdown at the top; default 1),
+  Optional URL parameters: lp=1 | 2 | custom (which LP, as in the buttons at the top; default 1),
   lpdef=<custom LP> (as made with "Edit LP": c1,c2|a1,a2,le|ge,b|a1,a2,le|ge,b|p1,p2|p1,p2|..., see specParam), u1, u2 (initial prices; u sets both), relax=12 | 1 | 2 | none
   (default: none, or the constraints whose price is given),
   dual=0 (hide the dual-function panel), labels=1 (start with all of the figure's labels shown;
@@ -88,12 +88,14 @@
   .cbtn:hover { color: var(--fg); border-color: var(--axis); }
   /* Choice of LP, top left (clear of the corner buttons) */
   .lpchoice { margin: 2px 40px 4px 0; font-size: 0.95rem; color: var(--muted); }
-  .lpchoice select { max-width: 100%; padding: 3px 6px; border: 1px solid var(--grid); border-radius: 6px;
-                     background: var(--bg); color: var(--fg); font: inherit; cursor: pointer; }
-  .lpchoice select:hover { border-color: var(--axis); }
-  .lpchoice button, .lpeditor button { margin-left: 6px; padding: 3px 10px; border: 1px solid var(--grid); border-radius: 6px;
+  .lpchoice { display: flex; flex-wrap: wrap; gap: 6px; }
+  .lpchoice button, .lpeditor button { padding: 3px 10px; border: 1px solid var(--grid); border-radius: 6px;
                      background: var(--bg); color: var(--fg); font: inherit; cursor: pointer; }
   .lpchoice button:hover, .lpeditor button:hover { border-color: var(--axis); }
+  /* The LP shown */
+  .lpchoice button[aria-pressed="true"] { border-color: var(--xlp-stroke); background: var(--xlp-fill); }
+  .lpchoice .caret { display: inline-block; margin-left: 4px; font-size: 0.8em; transition: transform 0.15s; }
+  .lpchoice button[aria-expanded="true"] .caret { transform: rotate(180deg); }
   /* "Edit LP": a form with the LP's numbers */
   .lpeditor { margin: 4px 0 8px; padding: 8px 10px; border: 1px solid var(--grid); border-radius: 6px; font-size: 0.95rem; }
   .lpeditor[hidden] { display: none; }
@@ -206,13 +208,13 @@
   .wrap.horizontal > .dual { align-self: center; margin-top: 0; border-top: 0; padding-top: 0; }
   /* the choice of LP and the written-out LP across both columns, centred on the page */
   .wrap.horizontal > .top { grid-column: 1 / -1; }
-  .wrap.horizontal .lpchoice { margin: 2px 76px 4px; text-align: center; }
+  .wrap.horizontal .lpchoice { margin: 2px 76px 4px; justify-content: center; }
   .wrap.horizontal .lpeditor { max-width: 720px; margin: 4px auto 8px; }
   @media (min-width: 1000px) {
     .wrap.auto { max-width: 1520px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 28px; }
     .wrap.auto > .dual { align-self: center; margin-top: 0; border-top: 0; padding-top: 0; }
     .wrap.auto > .top { grid-column: 1 / -1; }
-    .wrap.auto .lpchoice { margin: 2px 76px 4px; text-align: center; }
+    .wrap.auto .lpchoice { margin: 2px 76px 4px; justify-content: center; }
     .wrap.auto .lpeditor { max-width: 720px; margin: 4px auto 8px; }
   }
   #dualfig { touch-action: none; cursor: crosshair; }
@@ -233,8 +235,8 @@
        href="https://chalmers-mathematical-optimization.github.io/Large-Scale-Optimization-Illustrations/Lagrangean%20Relaxation.html">↗</a>
   </div>
   <div class="top">
-  <div class="lpchoice"><label>LP: <select id="lpSelect"></select></label>
-    <button type="button" id="lpEdit">Edit LP</button></div>
+  <div class="lpchoice" id="lpChoice" role="group" aria-label="LP">
+    <button type="button" id="lpCustom" aria-expanded="false" aria-controls="lpEditor">Custom<span class="caret" aria-hidden="true">▾</span></button></div>
   <div class="lpeditor" id="lpEditor" hidden>
     <div class="lpform" id="lpForm"></div>
     <div class="lppts" id="lpPts"><span class="op"><i>X</i><sub>LP</sub> = conv</span>
@@ -304,7 +306,7 @@
   // Coordinates are in problem space; the view uses equal scaling on both axes.
   // View of the built-in LPs; a custom LP gets a view of the same shape fitted to it (autoView).
   const VIEW0 = { xmin: -2.6, xmax: 10.4, ymin: -1.6, ymax: 8.4 };  // 13 x 10 units, 720 px wide
-  // The LPs to choose between (dropdown at the top, or ?lp=1, 2, ...). For each:
+  // The LPs to choose between (buttons at the top, or ?lp=1, 2, ...). For each:
   //   XLP:  vertices of X_LP, in order;  C: objective (minimise c^T x), drawn from the origin.
   //   Label positions are preferences: labels move to nearby free spots to avoid overlaps.
   //   XLP_LABEL: in the part of X_LP that violates a constraint;
@@ -1876,13 +1878,23 @@
   // Choice of LP. Switching keeps which constraints are relaxed but starts the prices at 0; the choice
   // is kept in the URL (?lp=, and the custom LP in ?lpdef=) so that reloading or sharing the link
   // shows the same LP. "Edit LP" opens a form filled in with the current LP; applying it makes it the custom LP.
-  const lpSelect = document.getElementById("lpSelect");
-  LPS.forEach((lp, n) => lpSelect.add(new Option(`${n + 1}. ${lp.name}`, String(n))));
-  const customOpt = new Option("Custom", "custom");
-  if (customLP) lpSelect.add(customOpt);
-  lpSelect.value = String(lpIndex);
+  // One button per built-in LP, then "Custom", which opens and closes the form (and shows the custom LP, once there is one).
+  const lpChoice = document.getElementById("lpChoice"), lpCustom = document.getElementById("lpCustom");
+  const lpButtons = LPS.map((lp, n) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.textContent = lp.name;
+    b.addEventListener("click", () => { if (lpIndex !== n) switchLP(n); });
+    lpChoice.insertBefore(b, lpCustom);
+    return b;
+  });
+  const markLP = () => {
+    lpButtons.forEach((b, n) => b.setAttribute("aria-pressed", String(lpIndex === n)));
+    lpCustom.setAttribute("aria-pressed", String(lpIndex === "custom"));
+  };
+  markLP();
   function switchLP(n) {
     useLP(n);
+    markLP();
     sliders.forEach(s => { s.step = "0.01"; s.value = "0"; });
     tieKey = null; tieShape = null; lastSlot.clear();
     const q = new URLSearchParams(location.search);
@@ -1892,7 +1904,6 @@
     try { history.replaceState(null, "", "?" + q); } catch (e) { /* e.g. sandboxed frame */ }
     render();
   }
-  lpSelect.addEventListener("change", () => switchLP(lpSelect.value === "custom" ? "custom" : +lpSelect.value));
 
   // The form: min c1 x1 + c2 x2, the two constraints (a1 x1 + a2 x2, <= or >=, b), and the points whose
   // convex hull is X_LP (× removes one, at least three are kept; + adds one).
@@ -1925,7 +1936,7 @@
     lpPts.querySelectorAll(".pt").forEach(r => r.remove());
     sp.pts.forEach(p => addPoint(p));
     lpError.textContent = err || "";
-    lpEditor.hidden = false;
+    showEditor(true);
   }
   // The form's values as a spec; an unreadable field is marked and throws.
   function readForm() {
@@ -1942,11 +1953,16 @@
     const pts = [...lpPts.querySelectorAll(".pt")].map(r => ins(r).map(num));
     return { c, cons, pts };
   }
-  document.getElementById("lpEdit").addEventListener("click", () => {
-    if (lpEditor.hidden) openEditor(specOf(lpIndex === "custom" ? customLP : LPS[lpIndex]));
-    else lpEditor.hidden = true;
+  function showEditor(on) {
+    lpEditor.hidden = !on;
+    lpCustom.setAttribute("aria-expanded", String(on));
+  }
+  lpCustom.addEventListener("click", () => {
+    if (customLP && lpIndex !== "custom") { switchLP("custom"); openEditor(specOf(customLP)); }
+    else if (!lpEditor.hidden) showEditor(false);
+    else openEditor(specOf(lpIndex === "custom" ? customLP : LPS[lpIndex]));
   });
-  document.getElementById("lpClose").addEventListener("click", () => { lpEditor.hidden = true; });
+  document.getElementById("lpClose").addEventListener("click", () => showEditor(false));
   document.getElementById("lpAddPt").addEventListener("click", () => addPoint().querySelector("input").focus());
   const applyLP = () => {
     let lp;
@@ -1954,8 +1970,6 @@
     try { lp = buildLP(readForm()); } catch (e) { lpError.textContent = e.message; return; }
     lpError.textContent = "";
     customLP = lp;
-    if (!customOpt.parentNode) lpSelect.add(customOpt);
-    lpSelect.value = "custom";
     switchLP("custom");
   };
   document.getElementById("lpApply").addEventListener("click", applyLP);
