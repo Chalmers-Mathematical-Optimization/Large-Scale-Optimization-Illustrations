@@ -29,7 +29,7 @@
   or a map over (u_1, u_2) coloured by the optimal extreme point (both relaxed).
 
   Embed with e.g.  <iframe src="lagrangean-relaxation.html?u1=0.8&u2=0.5" width="760" height="1100"></iframe>
-  Optional URL parameters: u1, u2 (initial prices; u sets both), relax=12 | 1 | 2 | none
+  Optional URL parameters: lp=1 | 2 (which LP, as in the dropdown at the top; default 1), u1, u2 (initial prices; u sets both), relax=12 | 1 | 2 | none
   (default: none, or the constraints whose price is given),
   dual=0 (hide the dual-function panel), labels=1 (start with all of the figure's labels shown;
   by default a label appears while hovering over its object), theme=dark (default light), side=1 (dual-function panel beside the figure), map=3d | vertex | value (3-D graph, the default; or a 2-D map coloured by optimal extreme point or by the value of h_LP).
@@ -67,7 +67,12 @@
     --opt: #ffffff; --halo: #17171b; --star: #a67c00; --star-edge: #ffffff;
   }
   html, body { margin: 0; background: var(--bg); color: var(--fg); }
-  body { font-family: "Latin Modern Roman", "CMU Serif", "Cambria", Georgia, serif; }
+  /* Sans-serif for text; serif for math (the system, the readout sum, the figures' labels, inline i/sub/sup) */
+  :root { --text-font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+          --math-font: "Latin Modern Roman", "CMU Serif", "Cambria", Georgia, serif; }
+  body { font-family: var(--text-font); }
+  .formula, .readout .sum, .uval, .controls label[for], svg text, .wrap i, .wrap sub, .wrap sup { font-family: var(--math-font); }
+  .formula label.relax { font-family: var(--text-font); font-size: 0.9em; }
   .wrap { position: relative; max-width: 760px; margin: 0 auto; padding: 12px 16px; box-sizing: border-box; }
   /* Top-right corner: link to the standalone page, and the theme toggle */
   .corner { position: absolute; top: 8px; right: 12px; z-index: 1; display: flex; gap: 6px; }
@@ -75,6 +80,11 @@
           justify-content: center; border: 1px solid var(--grid); border-radius: 6px; background: var(--bg);
           color: var(--muted); font: inherit; font-size: 16px; line-height: 1; text-decoration: none; cursor: pointer; }
   .cbtn:hover { color: var(--fg); border-color: var(--axis); }
+  /* Choice of LP, top left (clear of the corner buttons) */
+  .lpchoice { margin: 2px 76px 4px 0; font-size: 0.95rem; color: var(--muted); }
+  .lpchoice select { max-width: 100%; padding: 3px 6px; border: 1px solid var(--grid); border-radius: 6px;
+                     background: var(--bg); color: var(--fg); font: inherit; cursor: pointer; }
+  .lpchoice select:hover { border-color: var(--axis); }
   /* Room for the tallest form (nothing relaxed: objective + 2 constraints + x ∈ X_LP = 4 rows), so the page doesn't jump */
   .formula { display: flex; justify-content: center; align-items: flex-start; font-size: 1.05rem; margin: 4px 0 8px; line-height: 1.6; min-height: calc(4 * 1.6em); }
   /* Columns: lhs | min / s. t. | left side | relation | right side | relax checkbox. No column gap, so a
@@ -138,11 +148,11 @@
   .formula .lhs > span { grid-area: 1 / 1; }
   .formula .lhs .hid { visibility: hidden; }
   .dual { margin-top: 14px; border-top: 1px solid var(--grid); padding-top: 10px; }
-  /* "Side by side": the dual-function panel to the right of the figure (stacked again on narrow screens). */
+  /* "Side by side": the dual-function panel to the right of the rest (stacked again on narrow screens). */
   @media (min-width: 1000px) {
     .wrap.side { max-width: 1520px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 28px; }
-    .wrap.side > :not(.dual) { grid-column: 1; }
-    .wrap.side > .dual { grid-column: 2; grid-row: 2; align-self: center; margin-top: 0; border-top: 0; padding-top: 0; }
+    /* the dual-function panel beside everything else (the .main column), centred against it */
+    .wrap.side > .dual { align-self: center; margin-top: 0; border-top: 0; padding-top: 0; }
   }
   #dualfig { touch-action: none; cursor: crosshair; }
   #dualfig.rotate { cursor: grab; }
@@ -151,6 +161,7 @@
              font-size: 0.9rem; color: var(--muted); margin-bottom: 4px; }
   .mapmode label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
   .mapmode[hidden] { display: none; }
+  #subfig { margin-top: 14px; }
   .dualcap { font-size: 0.9rem; color: var(--muted); text-align: center; line-height: 1.6; margin: 4px 8px 0; }
 </style>
 </head>
@@ -161,6 +172,8 @@
        href="https://chalmers-mathematical-optimization.github.io/Large-Scale-Optimization-Illustrations/Lagrangean%20Relaxation.html">↗</a>
     <button type="button" class="cbtn" id="themeBtn"></button>
   </div>
+  <div class="main">
+  <div class="lpchoice"><label>LP: <select id="lpSelect"></select></label></div>
   <div class="formula" id="formula"></div>
   <svg id="fig" viewBox="0 0 720 600" role="img" aria-label="Polyhedron X_LP cut by two constraints, with the objective vector, the scaled constraint normals and the resulting Lagrangean objective direction."></svg>
   <details class="options">
@@ -185,6 +198,7 @@
     <span class="uval" id="uval2">= 0.00</span>
   </div>
   <div class="readout" id="readout"></div>
+  </div>
   <div class="dual" id="dual">
     <div class="mapmode" id="mapmode">
       Mode:
@@ -194,6 +208,8 @@
     </div>
     <svg id="dualfig" viewBox="0 0 720 290" role="img" aria-label="The dual function h_LP plotted against the Lagrangean prices."></svg>
     <div class="dualcap" id="dualcap"></div>
+    <svg id="subfig" viewBox="0 0 720 230" role="img" aria-label="The subdifferential of h_LP at u, in subgradient coordinates."></svg>
+    <div class="dualcap" id="subcap"></div>
   </div>
 </div>
 
@@ -202,17 +218,38 @@
   // ---------------------------------------------------------------- CONFIG
   // Coordinates are in problem space; the view uses equal scaling on both axes.
   const VIEW = { xmin: -2.6, xmax: 10.4, ymin: -1.6, ymax: 8.4 };  // 13 x 10 units, 720 px wide
-  const XLP = [[1, 1], [7, 0.8], [9.2, 3], [8.5, 6.5], [5, 7.6], [1.5, 6]];  // vertices, in order
-  const C = [-2, -1.2];               // objective (minimise c^T x), drawn from the origin
-  // Label positions below are preferences: labels move to nearby free spots to avoid overlaps.
-  const XLP_LABEL = [7.8, 5.6];       // in the part of X_LP that violates a constraint
-  const XLP_OPT_LABEL = [0.22, 0.2];  // preferred direction of the x*_LP label from that point
-  // Relaxed constraints A_i^T x <= b_i, used as written; A_i (CONS[i].a) is the normal pointing out of the feasible side.
-  // The normal is drawn from the midpoint of the line's segment on the boundary of the
-  // unrelaxed feasible region X_LP ∩ {A_i^T x <= b_i for all i}.
-  const CONS = [
-    { a: [1, -0.15], b: 6.5,  labelAt: [7.85, 8.05], anchor: "start" },
-    { a: [0.7, 1],   b: 9.25, labelAt: [10.2, 3.7], anchor: "end" },
+  // The LPs to choose between (dropdown at the top, or ?lp=1, 2, ...). For each:
+  //   XLP:  vertices of X_LP, in order;  C: objective (minimise c^T x), drawn from the origin.
+  //   Label positions are preferences: labels move to nearby free spots to avoid overlaps.
+  //   XLP_LABEL: in the part of X_LP that violates a constraint;
+  //   XLP_OPT_LABEL: preferred direction of the x*_LP label from that point.
+  //   CONS: relaxed constraints A_i^T x <= b_i, used as written; A_i (a) is the normal pointing out of the
+  //   feasible side. The normal is drawn from the midpoint of the line's segment on the boundary of the
+  //   unrelaxed feasible region X_LP ∩ {A_i^T x <= b_i for all i}. labelAt/anchor: fixed label spot.
+  const LPS = [
+    {
+      name: "Optimum in the interior of X_LP",
+      XLP: [[1, 1], [7, 0.8], [9.2, 3], [8.5, 6.5], [5, 7.6], [1.5, 6]],
+      C: [-2, -1.2],
+      XLP_LABEL: [7.8, 5.6],
+      XLP_OPT_LABEL: [0.22, 0.2],
+      CONS: [
+        { a: [1, -0.15], b: 6.5,  labelAt: [7.85, 8.05], anchor: "start" },
+        { a: [0.7, 1],   b: 9.25, labelAt: [10.2, 3.7], anchor: "end" },
+      ],
+    },
+    {
+      // x*_LP is where constraint 1 crosses the top edge of X_LP.
+      name: "Optimum on the boundary of X_LP",
+      XLP: [[1, 1], [7, 0.8], [9.2, 3], [8.5, 6.5], [5, 7.6], [1.5, 6]],
+      C: [-2, -1.2],
+      XLP_LABEL: [8.4, 4.4],
+      XLP_OPT_LABEL: [-0.3, 0.4],
+      CONS: [
+        { a: [1, 0.25],  b: 8.6, labelAt: [8.7, -1.35], anchor: "end" },
+        { a: [-0.3, 1],  b: 5.5, labelAt: [-2.4, 5.45], anchor: "start" },
+      ],
+    },
   ];
   // ------------------------------------------------------------------------
 
@@ -243,25 +280,38 @@
   const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
   const VCOL = j => `var(--v${j % 8})`;
 
-  for (const k of CONS) {
-    k.n = Math.hypot(k.a[0], k.a[1]);          // ||a||
-    k.e = scale(1 / k.n, k.a);                  // unit normal, for geometry only
+  // The current LP (see LPS) and what is derived from it; set by useLP.
+  let lpIndex, XLP, C, XLP_LABEL, XLP_OPT_LABEL, CONS, zLP, xLP, cen;
+  function useLP(n) {
+    lpIndex = n;
+    ({ XLP, C, XLP_LABEL, XLP_OPT_LABEL, CONS } = LPS[n]);
+    for (const k of CONS) {
+      k.n = Math.hypot(k.a[0], k.a[1]);          // ||a||
+      k.e = scale(1 / k.n, k.a);                  // unit normal, for geometry only
+    }
+    // Foot of each normal: midpoint of {A_i^T x = b_i} ∩ X_LP ∩ (the other constraints).
+    for (const k of CONS) {
+      const poly = CONS.reduce((P, o) => (o === k ? P : clip(P, o.a, o.b)), XLP);
+      const eps = 1e-9, f = P => dot(k.a, P) - k.b, hits = [];
+      poly.forEach((P, i) => {
+        const Q = poly[(i + 1) % poly.length], fp = f(P), fq = f(Q);
+        if (Math.abs(fp) < eps) hits.push(P);
+        else if (Math.abs(fq) >= eps && fp * fq < 0) hits.push(add(P, scale(fp / (fp - fq), [Q[0] - P[0], Q[1] - P[1]])));
+      });
+      // Segment ends = extreme hits along the line direction.
+      const d = [-k.a[1], k.a[0]], t = hits.map(h => dot(d, h));
+      k.foot = hits.length >= 2
+        ? scale(0.5, add(hits[t.indexOf(Math.min(...t))], hits[t.indexOf(Math.max(...t))]))
+        : scale(k.b / k.n, k.e);
+    }
+    let feas = XLP;
+    for (const k of CONS) feas = clip(feas, k.a, k.b);
+    zLP = Math.min(...feas.map(v => dot(C, v)));
+    xLP = feas.find(v => dot(C, v) === zLP);
+    cen = scale(1 / XLP.length, XLP.reduce(add, [0, 0]));
   }
-  // Foot of each normal: midpoint of {A_i^T x = b_i} ∩ X_LP ∩ (the other constraints).
-  for (const k of CONS) {
-    const poly = CONS.reduce((P, o) => (o === k ? P : clip(P, o.a, o.b)), XLP);
-    const eps = 1e-9, f = P => dot(k.a, P) - k.b, hits = [];
-    poly.forEach((P, i) => {
-      const Q = poly[(i + 1) % poly.length], fp = f(P), fq = f(Q);
-      if (Math.abs(fp) < eps) hits.push(P);
-      else if (Math.abs(fq) >= eps && fp * fq < 0) hits.push(add(P, scale(fp / (fp - fq), [Q[0] - P[0], Q[1] - P[1]])));
-    });
-    // Segment ends = extreme hits along the line direction.
-    const d = [-k.a[1], k.a[0]], t = hits.map(h => dot(d, h));
-    k.foot = hits.length >= 2
-      ? scale(0.5, add(hits[t.indexOf(Math.min(...t))], hits[t.indexOf(Math.max(...t))]))
-      : scale(k.b / k.n, k.e);
-  }
+  const lpParam = parseInt(new URLSearchParams(location.search).get("lp"), 10);
+  useLP(lpParam >= 1 && lpParam <= LPS.length ? lpParam - 1 : 0);
 
   function el(tag, attrs, parent) {
     const e = document.createElementNS(NS, tag);
@@ -561,12 +611,6 @@
   // Regions and constraint lines depend on which constraints are relaxed; redrawn in render().
   const regions = el("g", { "clip-path": "url(#view)" });
 
-  let feas = XLP;
-  for (const k of CONS) feas = clip(feas, k.a, k.b);
-  const zLP = Math.min(...feas.map(v => dot(C, v)));
-  const xLP = feas.find(v => dot(C, v) === zLP);
-  const cen = scale(1 / XLP.length, XLP.reduce(add, [0, 0]));
-
   const inConvex = (poly, q) => {
     let sgn = 0;
     for (let i = 0; i < poly.length; i++) {
@@ -646,17 +690,21 @@
         if (+sliders[i].value > +sliders[i].max) sliders[i].value = sliders[i].max;
       });
     }
-    // Ticks: the optimal prices (a star, like x*_LP) and, with one relaxed constraint, the prices
-    // where x(u) switches extreme point, i.e. where the dashed line lies along a side of the region.
+    // Ticks: the optimal prices (a star, like x*_LP) and the prices where x(u) switches extreme point, i.e.
+    // where the dashed line lies along a side of the region and ∂h_LP(u) is more than a point. With both
+    // relaxed, these are for moving this slider with the other one kept where it is (they move with it):
+    // the other price's term is folded into each extreme point's constant.
     // Clicking a tick sets that slider exactly to it.
+    const u = [0, 1].map(i => (R.includes(i) ? parseFloat(sliders[i].value) : 0));
     const opt = R.length ? dualOptima(R, P) : [];
-    const breaks = R.length === 1 ? sweep(P.map(p => p.cv), P.map(p => p.d[R[0]])).slice(1).map(b => b.t) : [];
+    const breaksFor = i => sweep(P.map(p => p.cv + R.reduce((s, k) => s + (k === i ? 0 : u[k] * p.d[k]), 0)),
+                                 P.map(p => p.d[i])).slice(1).map(b => b.t);
     [0, 1].forEach(i => {
       ticks[i].replaceChildren();
       const n = R.indexOf(i);
       if (n < 0) return;
       const marks = new Map();                                     // rounded key -> { v, star }
-      breaks.forEach(v => marks.set(v.toFixed(6), { v, star: false }));
+      breaksFor(i).forEach(v => marks.set(v.toFixed(6), { v, star: false }));
       opt.forEach(uu => marks.set(uu[n].toFixed(6), { v: uu[n], star: true }));
       [...marks.values()].filter(m => m.v <= +sliders[i].max).forEach(({ v, star }) => {
         const b = document.createElement("button");
@@ -668,7 +716,6 @@
         ticks[i].appendChild(b);
       });
     });
-    const u = [0, 1].map(i => (R.includes(i) ? parseFloat(sliders[i].value) : 0));
     [0, 1].forEach(i => {
       const on = R.includes(i);
       sliders[i].disabled = !on;
@@ -697,12 +744,13 @@
     let cu = C.slice();
     R.forEach(i => { cu = add(cu, scale(u[i], CONS[i].a)); });
     const { h, j: best } = evalDual(P, R, u);
-    // Several optimal points: with one relaxed constraint at a switching price, a whole edge (the dashed
-    // line lies along it); with both relaxed and c + u_1 A_1 + u_2 A_2 = 0, all of X_LP. x(u) can then be
-    // dragged within that set; it starts at the tie-break vertex.
+    // Several optimal points: at a price where x(u) switches extreme point (one relaxed constraint), or on a
+    // ridge of h_LP (both relaxed), a whole edge (the dashed line lies along it); with both relaxed and
+    // c + u_1 A_1 + u_2 A_2 = 0, all of X_LP. x(u) can then be dragged within that set; it starts at the
+    // tie-break vertex.
     let xs = domain[best];
-    const tied = R.length === 1
-      ? P.map((p, j) => j).filter(j => P[j].cv + u[R[0]] * P[j].d[R[0]] <= h + 1e-9 * (1 + Math.abs(h))) : [];
+    const tied = R.length
+      ? P.map((p, j) => j).filter(j => P[j].cv + R.reduce((s, i) => s + u[i] * P[j].d[i], 0) <= h + 1e-9 * (1 + Math.abs(h))) : [];
     const flat = R.length === 2 && Math.hypot(cu[0], cu[1]) < 1e-9;
     if (flat || tied.length >= 2) {
       if (flat) tieShape = { poly: domain, has: q => inConvex(domain, q) };
@@ -721,6 +769,10 @@
     svg.style.touchAction = tieShape ? "none" : "";
     // Values at the shown point: c^T x(u) and A_i^T x(u) - b_i.
     const xc = dot(C, xs), xd = CONS.map(k => dot(k.a, xs) - k.b);
+    // Subgradients of h_LP at u: g(x) = (A_i^T x - b_i)_{i in R} for optimal x. The subdifferential is the
+    // image of the optimal set: the convex hull of g at the optimal extreme points (verts, in domain order).
+    const sub = { img: P.map(p => R.map(i => p.d[i])), g: R.map(i => xd[i]),
+                  verts: flat ? P.map((p, j) => j) : tied.length >= 2 ? tied : [best] };
 
     // Zoom out if the arrows (c chain, resultant, penalty arrows) or penalty boxes would leave the view.
     // Points that must be visible when x(u) = q (only what is shown):
@@ -961,7 +1013,8 @@
       [...top, ...bot].map(c => `<span>${c}</span>`).join("") + "</div>";
     readout.innerHTML = sum;
 
-    renderDual(R, P, u, best, h);
+    curOpt = opt;
+    renderDual(R, P, u, best, h, sub);
   }
 
   // ---------------------------------------------------------------- dual-function panel
@@ -971,7 +1024,7 @@
   const DW = 720, DH = 290;
   let pick = null;                  // (x, y) in panel coordinates -> sets sliders
   let pickArea = null;              // [x0, y0, x1, y1] where a drag may start
-  let mapCache = { key: null, url: null, opt: null };
+  let mapCache = { key: null, url: null };
   const RAMP = ["#440154", "#3b528b", "#21918c", "#5ec962", "#fde725"];   // viridis, low -> high
   const modeBox = document.getElementById("mapmode");
   let mapMode = "3d";                                              // dual map: "3d" | "vertex" | "value"
@@ -994,16 +1047,104 @@
     return e;
   };
 
-  function renderDual(R, P, u, best, h) {
+  function renderDual(R, P, u, best, h, sub) {
     dsvg.replaceChildren();
     pick = null; pickArea = null;
     dualBox.hidden = !showDual || !R.length;
     if (dualBox.hidden) return;
     modeBox.hidden = true;
-    lastDual = [R, P, u, best, h]; grab3d = null;
+    lastDual = [R, P, u, best, h, sub]; grab3d = null;
     const in3d = R.length === 2 && mapMode === "3d";
     dsvg.classList.toggle("rotate", in3d);
-    (R.length === 1 ? dual1D : in3d ? dual3D : dual2D)(R, P, u, best, h);
+    (R.length === 1 ? dual1D : in3d ? dual3D : dual2D)(R, P, u, best, h, sub);
+    renderSub(R, P, u, h, sub);
+  }
+  // Optimal prices (from dualOptima) and setting a slider to a price; picking within a few pixels of an
+  // optimum in the dual panel snaps to it exactly (step "any"), so that the kink there can be reached.
+  let curOpt = [];
+  const setU = (n, v, exact) => { sliders[n].step = exact ? "any" : "0.01"; sliders[n].value = exact ? String(v) : v.toFixed(2); };
+
+  // ---- The subdifferential ∂h_LP(u) in subgradient coordinates g = (A_i^T x - b_i)_{i in R}: a number
+  // line (one relaxed constraint) or a plane (both), equally scaled, fitted to g of the whole domain.
+  const ssvg = document.getElementById("subfig"), scap = document.getElementById("subcap");
+  function renderSub(R, P, u, h, sub) {
+    ssvg.replaceChildren();
+    const one = R.length === 1, SW = 720, SH = one ? 84 : 230;
+    ssvg.setAttribute("viewBox", `0 0 ${SW} ${SH}`);
+    const G = sub.img, gs = sub.verts.map(j => G[j]);
+    const span = n => {
+      const v = [0, ...G.map(g => g[n])], lo = Math.min(...v), hi = Math.max(...v), pad = 0.1 * (hi - lo || 1);
+      return [lo - pad, hi + pad];
+    };
+    const [l0, h0] = span(0), [l1, h1] = one ? [0, 0] : span(1);
+    const X0 = one ? 110 : 200, X1 = one ? 560 : 520, Y0 = 14, Y1 = SH - 18;
+    const k = one ? (X1 - X0) / (h0 - l0) : Math.min((X1 - X0) / (h0 - l0), (Y1 - Y0) / (h1 - l1));
+    const ox = (X0 + X1) / 2 - k * (l0 + h0) / 2, oy = one ? 30 : (Y0 + Y1) / 2 + k * (l1 + h1) / 2;
+    const gp = g => [ox + k * g[0], one ? oy : oy - k * g[1]];
+    const ptsG = list => list.map(g => gp(g).map(v => v.toFixed(1)).join(",")).join(" ");
+    const slackParts = i => [["A", "it"], [String(i + 1), "sub"], ["T", "sup"], ["x", "it"], [" − ", ""], ["b", "it"], [String(i + 1), "sub"]];
+    const seg = (a, b, stroke, w, extra = {}) => {
+      const e = el("line", { x1: a[0], y1: a[1], x2: b[0], y2: b[1], "stroke-width": w, "stroke-linecap": "round", ...extra }, ssvg);
+      e.style.stroke = stroke;
+      return e;
+    };
+
+    // Axes through g = 0, labelled with the constraint they measure.
+    const [zx, zy] = gp([0, 0]);
+    if (one) {
+      seg([X0 - 30, oy], [X1 + 30, oy], "var(--axis)", 1.2);
+      labelPx(X1 + 38, oy + 5, slackParts(R[0]), { style: `fill:var(${NCOL[R[0]]})` }, ssvg);
+    } else {
+      seg([X0 - 30, zy], [X1 + 30, zy], "var(--axis)", 1.2);
+      seg([zx, Y0 - 6], [zx, Y1 + 6], "var(--axis)", 1.2);
+      labelPx(X1 + 38, zy + 5, slackParts(R[0]), { style: `fill:var(${NCOL[R[0]]})` }, ssvg);
+      labelPx(zx - 10, Y0 + 6, slackParts(R[1]), { "text-anchor": "end", style: `fill:var(${NCOL[R[1]]})` }, ssvg);
+    }
+    // g over the whole domain (light), and the subdifferential (dark).
+    if (one) {
+      const v = G.map(g => g[0]);
+      seg(gp([Math.min(...v)]), gp([Math.max(...v)]), "var(--feas-fill)", 12);
+      const s = gs.map(g => g[0]);
+      if (gs.length >= 2) seg(gp([Math.min(...s)]), gp([Math.max(...s)]), "var(--fg)", 12, { "stroke-opacity": 0.35 });
+    } else {
+      const img = el("polygon", { points: ptsG(G), "stroke-width": 1.5, "stroke-linejoin": "round" }, ssvg);
+      img.style.fill = "var(--feas-fill)"; img.style.stroke = "var(--xlp-stroke)";
+      if (gs.length >= 3) {
+        const d = el("polygon", { points: ptsG(gs), "fill-opacity": 0.3, "stroke-width": 2, "stroke-linejoin": "round" }, ssvg);
+        d.style.fill = "var(--fg)"; d.style.stroke = "var(--fg)";
+      } else if (gs.length === 2) seg(gp(gs[0]), gp(gs[1]), "var(--fg)", 7, { "stroke-opacity": 0.4 });
+    }
+    // Extreme points (coloured as in the figure), the origin, and g(x(u)).
+    G.forEach((g, j) => {
+      const [x, y] = gp(g);
+      el("circle", { cx: x, cy: y, r: 4.5, "stroke-width": 1.5 }, ssvg).style.cssText = `fill:${VCOL(j)};stroke:var(--bg)`;
+    });
+    if (one) {
+      seg([zx, oy - 9], [zx, oy + 9], "var(--fg)", 1.5);
+      labelPx(zx, oy + 26, [["0", ""]], { "text-anchor": "middle", class: "small" }, ssvg);
+    } else {
+      el("circle", { cx: zx, cy: zy, r: 4, fill: "none", "stroke-width": 1.5 }, ssvg).style.stroke = "var(--fg)";
+      labelPx(zx - 7, zy + 17, [["0", ""]], { "text-anchor": "end", class: "small" }, ssvg);
+    }
+    const [cx, cy] = gp(sub.g);
+    el("circle", { cx, cy, r: 8 }, ssvg).style.fill = "var(--halo)";
+    el("circle", { cx, cy, r: 5.5 }, ssvg).style.fill = "var(--opt)";
+    labelPx(one ? SW / 2 : 40, one ? SH - 4 : Y1 + 4,
+      [["g", "it"], ["(", ""], ["x", "it"], ["(", ""], ["u", "it"], [")) = ", ""], [one ? fmt(sub.g[0]) : `(${fmt(sub.g[0])}, ${fmt(sub.g[1])})`, ""]],
+      { "text-anchor": one ? "middle" : "start" }, ssvg);
+
+    // u is optimal iff some subgradient g has g_i = 0 where u_i > 0 and g_i <= 0 where u_i = 0.
+    const wOf = o => { const w = [0, 0]; R.forEach((i, n) => { w[i] = o[n]; }); return w; };
+    const top = curOpt.length ? Math.max(...curOpt.map(o => evalDual(P, R, wOf(o)).h)) : Infinity;
+    const isOpt = h >= top - 1e-9 * (1 + Math.abs(top));
+    scap.innerHTML =
+      `Subgradients <i>g</i>(<i>x</i>) = (<i>A</i><sub><i>i</i></sub><sup>T</sup><i>x</i> − <i>b</i><sub><i>i</i></sub>)<sub><i>i</i> relaxed</sub>. ` +
+      `Light: <i>g</i>(<i>x</i>) for every feasible <i>x</i> of the subproblem (dots: its extreme points). ` +
+      `Dark: the subdifferential ∂<i>h</i><sub>LP</sub>(<i>u</i>), <i>g</i> of the optimal <i>x</i>; black: <i>g</i>(<i>x</i>(<i>u</i>))` +
+      (gs.length >= 2 ? ", which moves as <i>x</i>(<i>u</i>) is dragged in the figure." : ".") +
+      (!isOpt ? "" : R.every(i => u[i] > 1e-12)
+        ? " Since 0 ∈ ∂<i>h</i><sub>LP</sub>(<i>u</i>), <i>u</i> is optimal."
+        : " <i>u</i> is optimal: some subgradient has <i>g</i><sub><i>i</i></sub> ≤ 0 where <i>u</i><sub><i>i</i></sub> = 0 and <i>g</i><sub><i>i</i></sub> = 0 where <i>u</i><sub><i>i</i></sub> &gt; 0.");
   }
 
   // ---- 3-D graph of h_LP over (u_1, u_2), rotated by dragging.
@@ -1033,7 +1174,7 @@
     return faceCache;
   }
 
-  function dual3D(R, P, u, best, h) {
+  function dual3D(R, P, u, best, h, sub) {
     const U = [+sliders[0].max, +sliders[1].max];
     const F = faces3d(R, P, U), { lo, hi } = F, ZS = 1.1;
     modeBox.hidden = false;
@@ -1090,6 +1231,14 @@
         }
       });
 
+    // Supporting plane at u with gradient g(x(u)), over a patch around u; it tilts as x(u) is dragged.
+    const patch = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, b]) => {
+      const w = [clamp(u[0] + 0.22 * a * U[0], 0, U[0]), clamp(u[1] + 0.22 * b * U[1], 0, U[1])];
+      return [w[0], w[1], h + sub.g[0] * (w[0] - u[0]) + sub.g[1] * (w[1] - u[1])];
+    });
+    const sp = el("polygon", { points: patch.map(P2).join(" "), "fill-opacity": 0.22, "stroke-width": 1.2, "stroke-linejoin": "round" }, dsvg);
+    sp.style.fill = "var(--fg)"; sp.style.stroke = "var(--fg)";
+
     // Maximum (ring) and the current point on the surface.
     if (F.top) {
       const t = proj(F.top);
@@ -1111,6 +1260,10 @@
     grab3d = {
       x: cu3.x, y: cu3.y,
       toU: (sx, sy) => {
+        for (const o of curOpt) {                                  // snap to an optimum
+          const q = proj([o[0], o[1], evalDual(P, R, o).h]);
+          if (Math.hypot(q.x - sx, q.y - sy) < 9) return { w: o, exact: true };
+        }
         let j = best, w = null;
         for (let it = 0; it < 4; it++) {
           const nw = onFace(j, sx, sy);
@@ -1121,7 +1274,7 @@
           if (nj === j) break;
           j = nj;
         }
-        return w;
+        return w && { w, exact: false };
       },
     };
 
@@ -1140,11 +1293,12 @@
 
     dcap.innerHTML =
       `3D graph of <i>h</i><sub>LP</sub>(<i>u</i>); each face corresponds to one optimal extreme point. ` +
-      `Level curves for <i>h</i><sub>LP</sub> shown at every ${fmt(F.step)}. Drag the point to set <i>u</i>; drag elsewhere to rotate.`;
+      `Level curves for <i>h</i><sub>LP</sub> shown at every ${fmt(F.step)}. Drag the point to set <i>u</i>; drag elsewhere to rotate. ` +
+      `The gray plane is a supporting plane, with gradient <i>g</i>(<i>x</i>(<i>u</i>)).`;
   }
 
   // One relaxed constraint: one line per extreme point, h_LP is their lower envelope.
-  function dual1D(R, P, u, best, h) {
+  function dual1D(R, P, u, best, h, sub) {
     const i = R[0], U = +sliders[i].max;
     const X0 = 70, X1 = 690, Y0 = 18, Y1 = 248;
     const N = 250, env = [];
@@ -1179,6 +1333,17 @@
     const envPts = env.map((v, s) => `${sx(U * s / N).toFixed(1)},${sy(v).toFixed(1)}`).join(" ");
     const pl = el("polyline", { points: envPts, fill: "none", "stroke-width": 2, "stroke-linejoin": "round" }, g);
     pl.style.stroke = "var(--fg)";
+    // Supporting lines at u: their slopes are the subgradients, a fan at a kink (shaded); the one with
+    // slope g(x(u)) is drawn, and tilts as x(u) is dragged along the optimal edge.
+    const sl = sub.verts.map(j => P[j].d[i]), s0 = Math.min(...sl), s1 = Math.max(...sl), D = 0.3 * U, Df = 0.1 * U;
+    const at = (w, s) => [sx(w), sy(h + s * (w - u[i]))].map(v => v.toFixed(1)).join(",");
+    if (s1 - s0 > 1e-9) {
+      const fan = el("polygon", { points: [at(u[i], 0), at(u[i] + Df, s1), at(u[i] + Df, s0), at(u[i], 0), at(u[i] - Df, s0), at(u[i] - Df, s1)].join(" "),
+                                  "fill-opacity": 0.15, "stroke-opacity": 0.5, "stroke-width": 1 }, g);
+      fan.style.fill = "var(--fg)"; fan.style.stroke = "var(--fg)";
+    }
+    const [ta, tb] = [at(u[i] - D, sub.g[0]), at(u[i] + D, sub.g[0])].map(s => s.split(","));
+    el("line", { x1: ta[0], y1: ta[1], x2: tb[0], y2: tb[1], "stroke-width": 1.6 }, g).style.stroke = "var(--fg)";
     const fr = el("rect", { x: X0, y: Y0, width: X1 - X0, height: Y1 - Y0, fill: "none", "stroke-width": 1 }, dsvg);
     fr.style.stroke = "var(--axis)";
     labelPx(X1 - 6, sy(zLP) + 16, [["z", "it"], ["LP", "sub"]], { "text-anchor": "end", class: "small" }, dsvg);
@@ -1191,9 +1356,13 @@
     el("circle", { cx, cy, r: 5.5 }, dsvg).style.fill = "var(--opt)";
 
     pickArea = [X0 - 10, Y0 - 10, X1 + 10, Y1 + 10];
-    pick = (x) => { sliders[i].value = clamp(U * (x - X0) / (X1 - X0), 0, U).toFixed(2); };
+    pick = (x) => {
+      const o = curOpt.find(o => Math.abs(sx(o[0]) - x) < 7);
+      setU(i, o ? o[0] : clamp(U * (x - X0) / (X1 - X0), 0, U), !!o);
+    };
     dcap.innerHTML =
-      `Colored lines correspond to optimal extreme points. Set <i>u</i> by clicking.`;
+      `Colored lines correspond to optimal extreme points. Set <i>u</i> by clicking. ` +
+      `The black line through the point is a supporting line; at a kink, the shaded fan holds all of them.`;
   }
 
   // Both relaxed: map over (u_1, u_2), coloured by the optimal extreme point, with level curves of h_LP.
@@ -1229,19 +1398,19 @@
     labelPx(X0 + SIDE + 10, Y0 + SIDE + 5, [["u", "it"], ["1", "it-sub"]], {}, dsvg);
     labelPx(X0 - 30, Y0 + 12, [["u", "it"], ["2", "it-sub"]], { "text-anchor": "end" }, dsvg);
 
-    if (mapCache.opt) {
-      const [mx, my] = [sx(mapCache.opt[0]), sy(mapCache.opt[1])];
-      const ring = el("circle", { cx: mx, cy: my, r: 6, fill: "none", "stroke-width": 2 }, dsvg);
+    curOpt.forEach(o => {
+      const ring = el("circle", { cx: sx(o[0]), cy: sy(o[1]), r: 6, fill: "none", "stroke-width": 2 }, dsvg);
       ring.style.stroke = "var(--fg)";
-    }
+    });
     const cx = sx(u[0]), cy = sy(u[1]);
     el("circle", { cx, cy, r: 8 }, dsvg).style.fill = "var(--halo)";
     el("circle", { cx, cy, r: 5.5 }, dsvg).style.fill = "var(--opt)";
 
     pickArea = [X0 - 10, Y0 - 10, X0 + SIDE + 10, Y0 + SIDE + 10];
     pick = (x, y) => {
-      sliders[0].value = clamp(U[0] * (x - X0) / SIDE, 0, U[0]).toFixed(2);
-      sliders[1].value = clamp(U[1] * (1 - (y - Y0) / SIDE), 0, U[1]).toFixed(2);
+      const o = curOpt.find(o => Math.hypot(sx(o[0]) - x, sy(o[1]) - y) < 9);
+      setU(0, o ? o[0] : clamp(U[0] * (x - X0) / SIDE, 0, U[0]), !!o);
+      setU(1, o ? o[1] : clamp(U[1] * (1 - (y - Y0) / SIDE), 0, U[1]), !!o);
     };
     dcap.innerHTML =
       (mapMode === "value"
@@ -1250,25 +1419,23 @@
       `Level curves for <i>h</i><sub>LP</sub> shown at every ${fmt(mapCache.step || 0)}. Set <i>u</i> by clicking.`;
   }
 
-  // Raster of the 2-D dual map (data URL), the grid maximiser of h_LP, and the contour step.
+  // Raster of the 2-D dual map (data URL) and the contour step.
   function buildMap(R, P, U, mode) {
     const N = 360;
     const canvas = document.createElement("canvas");
     const ctx = canvas.getContext && canvas.getContext("2d");
     const hv = new Float64Array(N * N), jv = new Int16Array(N * N);
-    let opt = null;
     for (let r = 0; r < N; r++) {
       for (let c = 0; c < N; c++) {
         const uu = [U[0] * (c + 0.5) / N, U[1] * (1 - (r + 0.5) / N)];
         const { h, j } = evalDual(P, R, uu);
         hv[r * N + c] = h; jv[r * N + c] = j;
-        if (!opt || h > opt[2]) opt = [uu[0], uu[1], h];   // grid maximiser of h_LP
       }
     }
     let lo = Infinity, hi = -Infinity;
     for (const v of hv) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
     const step = niceStep((hi - lo) / 1.6);
-    if (!ctx) return { url: null, opt, step, lo, hi };
+    if (!ctx) return { url: null, step, lo, hi };
 
     canvas.width = canvas.height = N;
     const img = ctx.createImageData(N, N);
@@ -1290,7 +1457,7 @@
       }
     }
     ctx.putImageData(img, 0, 0);
-    return { url: canvas.toDataURL(), opt, step, lo, hi };
+    return { url: canvas.toDataURL(), step, lo, hi };
   }
 
   function toPanel(e) {
@@ -1323,9 +1490,9 @@
       dsvg.style.cursor = nearPoint3d(toPanel(e)) ? "move" : "";
     }
     if (moving3d) {
-      const p = toPanel(e), w = grab3d && grab3d.toU(p.x, p.y);
-      if (w) {
-        w.forEach((v, n) => { sliders[n].step = "0.01"; sliders[n].value = v.toFixed(2); });
+      const p = toPanel(e), r = grab3d && grab3d.toU(p.x, p.y);
+      if (r) {
+        r.w.forEach((v, n) => setU(n, v, r.exact));
         render();
       }
     } else if (rotating) {
@@ -1430,6 +1597,21 @@
     if (i === undefined) return;
     boxes[+i].checked = e.target.checked;
     if (e.target.checked) { sliders[+i].step = "0.01"; sliders[+i].value = "0"; }   // a newly relaxed constraint starts at u_i = 0
+    render();
+  });
+  // Choice of LP. Switching keeps which constraints are relaxed but starts the prices at 0; the choice
+  // is kept in the URL (?lp=) so that reloading or sharing the link shows the same LP.
+  const lpSelect = document.getElementById("lpSelect");
+  LPS.forEach((lp, n) => lpSelect.add(new Option(`${n + 1}. ${lp.name}`, String(n))));
+  lpSelect.value = String(lpIndex);
+  lpSelect.addEventListener("change", () => {
+    useLP(+lpSelect.value);
+    sliders.forEach(s => { s.step = "0.01"; s.value = "0"; });
+    tieKey = null; tieShape = null; lastSlot.clear();
+    const q = new URLSearchParams(location.search);
+    q.set("lp", String(lpIndex + 1));
+    ["u", "u1", "u2"].forEach(k => q.delete(k));                     // the prices were reset
+    try { history.replaceState(null, "", "?" + q); } catch (e) { /* e.g. sandboxed frame */ }
     render();
   });
   // Light/dark theme: ?theme= wins, then the viewer's last choice (this browser only), else light.
