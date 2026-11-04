@@ -69,11 +69,11 @@
     --opt: #ffffff; --halo: #17171b; --star: #a67c00; --star-edge: #ffffff;
   }
   html, body { margin: 0; background: var(--bg); color: var(--fg); }
-  /* Sans-serif for text; serif for math (the system, the readout sum, the figures' labels, inline i/sub/sup) */
+  /* Sans-serif for text; serif for math (the system, the figures' labels, inline i/sub/sup) */
   :root { --text-font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
           --math-font: "Latin Modern Roman", "CMU Serif", "Cambria", Georgia, serif; }
   body { font-family: var(--text-font); }
-  .formula, .readout .sum, .uval, .controls label[for], svg text, .wrap i, .wrap sub, .wrap sup { font-family: var(--math-font); }
+  .formula, .uval, .controls label[for], svg text, .wrap i, .wrap sub, .wrap sup { font-family: var(--math-font); }
   .formula label.relax { font-family: var(--text-font); font-size: 0.9em; }
   .wrap { position: relative; max-width: 760px; margin: 0 auto; padding: 12px 16px; box-sizing: border-box; }
   /* Top-right corner: link to the standalone page, and the theme toggle */
@@ -87,8 +87,8 @@
   .lpchoice select { max-width: 100%; padding: 3px 6px; border: 1px solid var(--grid); border-radius: 6px;
                      background: var(--bg); color: var(--fg); font: inherit; cursor: pointer; }
   .lpchoice select:hover { border-color: var(--axis); }
-  /* Room for the tallest form (nothing relaxed: objective + 2 constraints + x ∈ X_LP = 4 rows), so the page doesn't jump */
-  .formula { display: flex; justify-content: center; align-items: flex-start; font-size: 1.05rem; margin: 4px 0 8px; line-height: 1.6; min-height: calc(4 * 1.6em); }
+  /* Room for the system (values, objective, 2 constraints, x ∈ X_LP), so the page doesn't jump */
+  .formula { display: flex; justify-content: safe center; align-items: flex-start; font-size: 1.05rem; margin: 4px 0 8px; line-height: 1.6; min-height: calc(5 * 1.6em); }
   /* Columns: lhs | min / s. t. | left side | relation | right side | relax checkbox. No column gap, so a
      struck-through constraint is struck continuously; spacing comes from padding and the relation's spaces. */
   .formula .f { display: grid; grid-template-columns: auto auto auto auto 1fr auto; align-items: baseline; }
@@ -99,6 +99,11 @@
   .formula .l { text-align: right; }
   .formula .obj { grid-column: span 3; }
   .formula .x { padding-left: 0.6em; }
+  /* Objective row: the values at x(u) above the terms and factors, one column each so they line up */
+  .formula .stk { display: grid; grid-template-rows: auto auto; grid-auto-flow: column; justify-items: center; align-items: baseline; white-space: nowrap; }
+  .formula .val { font-size: 0.85em; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .formula .val b { color: var(--fg); font-weight: normal; }
+  .formula .pl { padding: 0 0.3em; }
   .formula i, svg .it { font-style: italic; }
   svg { width: 100%; height: auto; display: block; user-select: none; }
   svg text { fill: var(--fg); font-size: 17px;
@@ -155,11 +160,6 @@
   .formula label.relax { margin-left: 0.3em; cursor: pointer; white-space: nowrap; }
   .formula label.relax input { margin: 0 0.2em 0 0; cursor: pointer; vertical-align: middle; }
   .uval { min-width: 4.5em; font-variant-numeric: tabular-nums; }
-  .readout { margin-top: 6px; font-size: 0.95rem; color: var(--muted); text-align: center;
-             font-variant-numeric: tabular-nums; line-height: 1.7; }
-  .readout b { color: var(--fg); font-weight: normal; }
-  .readout .sum { color: var(--fg); display: inline-grid; column-gap: 0.45em; row-gap: 2px; justify-items: center; align-items: baseline; margin: 4px 0; }
-  .ok { color: var(--pos); } .bad { color: var(--neg); }
   .n1 { color: var(--n1); } .n2 { color: var(--n2); }
   .formula .inactive { opacity: 0.4; text-decoration: line-through; }
   .formula .lhs { display: inline-grid; justify-items: end; }
@@ -236,7 +236,6 @@
     <span class="track"><input id="u2" type="range" min="0" max="2.5" step="0.01" value="0"><span class="ticks" id="ticks2"></span></span>
     <span class="uval" id="uval2">= 0.00</span>
   </div>
-  <div class="readout" id="readout"></div>
   </div>
   <div class="dual" id="dual">
     <div class="mapmode" id="mapmode">
@@ -700,11 +699,10 @@
     return Math.hypot(rx - lx, ry - ly) < 8 && tieShape.has(xLP) ? xLP.slice() : r;
   }
   const formula = document.getElementById("formula");
-  const readout = document.getElementById("readout");
   const NCOL = ["--n1", "--n2"];
   const fmt = v => (Math.abs(v) < 5e-3 ? 0 : v).toFixed(2);
   // Constraint as [left side, relation, right side], so the relations line up in the formula.
-  const consHtml = i => [`<i>A</i><sub>${i + 1}</sub><sup>T</sup><i>x</i>`, "&nbsp;≤&nbsp;", `<i>b</i><sub>${i + 1}</sub>`];
+  const consHtml = (i, ptHtml) => [`<i>A</i><sub>${i + 1}</sub><sup>T</sup>${ptHtml}`, "&nbsp;≤&nbsp;", `<i>b</i><sub>${i + 1}</sub>`];
   // A_j^T x - b_j as HTML for the point ptHtml (e.g. x(u)), and A_j^T x(u) - b_j as SVG label parts.
   const slackHtml = (j, ptHtml) => `<i>A</i><sub>${j}</sub><sup>T</sup>${ptHtml} − <i>b</i><sub>${j}</sub>`;
   const slack = j => [["A", "it"], [j, "sub"], ["T", "sup"], ["x", "it"], ["(", ""], ["u", "it"], [")", ""], [" − ", ""], ["b", "it"], [j, "sub"]];
@@ -762,22 +760,6 @@
       uvals[i].textContent = "= " + (on ? u[i] : +sliders[i].value).toFixed(2);
     });
     const anyU = R.some(i => u[i] > 0);
-
-    // Formula for the current relaxation: objective, then kept constraints, then x ∈ X_LP.
-    // Both left-hand sides occupy the same cell (only one visible), so switching doesn't move the system.
-    const lhs = `<span class="lhs"><span${R.length ? "" : ' class="hid"'}><i>h</i><sub>LP</sub>(<i>u</i>) =</span>` +
-                `<span${R.length ? ' class="hid"' : ""}><i>z</i><sub>LP</sub> =</span></span>`;
-    // Both penalty terms and both constraints are always shown, in their constraint's colour; the inactive
-    // one of each pair (penalty of a kept constraint, constraint that is relaxed) is dimmed and struck through.
-    const inact = on => (on ? "" : " inactive");
-    const obj = "<i>c</i><sup>T</sup><i>x</i>" + [0, 1].map(i =>
-      ` <span class="n${i + 1}${inact(R.includes(i))}">+ <i>u</i><sub>${i + 1}</sub>(<i>A</i><sub>${i + 1}</sub><sup>T</sup><i>x</i> − <i>b</i><sub>${i + 1}</sub>)</span>`).join("");
-    const stRows = [...[0, 1].map(i => [consHtml(i), ` n${i + 1}${inact(K.includes(i))}`]),
-                    [["<i>x</i>", "&nbsp;∈&nbsp;", "<i>X</i><sub>LP</sub>"], ""]];
-    const relaxBox = i => `<label class="relax"><input type="checkbox" class="relax${i + 1}" data-i="${i}"` +
-      `${R.includes(i) ? " checked" : ""}> Relax</label>`;
-    formula.innerHTML = `<div class="f">${fRow(lhs, `<span class="under"><span>min</span><i>x</i></span>`, obj)}` +
-      stRows.map(([r, cls], n) => fRow("", n === 0 ? "s. t." : "", r, n < 2 ? relaxBox(n) : "", cls)).join("") + "</div>";
 
     // Penalised objective and the optimal extreme point of the subproblem.
     let cu = C.slice();
@@ -1034,23 +1016,35 @@
     placeLabels(dyn);
     applyHover();
 
-    // Readout: h_LP(u) = c^T x(u) + sum u_i (A_i^T x(u) - b_i), term by term, with the values underneath,
-    // summed on that row (z_LP = c^T x*_LP with nothing relaxed). The coordinates of x(u) show on hover.
-    // Prices in their arrows' colours; A_i^T x(u) - b_i green if x(u) satisfies constraint i, red if not.
+    // Formula for the current relaxation, written at the shown point x(u) (x*_LP with nothing relaxed):
+    // objective, then kept constraints, then x(u) ∈ X_LP.
+    // Both left-hand sides occupy the same cell (only one visible), so switching doesn't move the system.
+    // Above the objective row, the values: h_LP(u) (z_LP), c^T x(u), and for each relaxed constraint
+    // u_i · (A_i^T x(u) - b_i), in constraint i's colour. The cells of the objective row are [value, expression] pairs.
     const xsHtml = R.length ? "<i>x</i>(<i>u</i>)" : "<i>x</i>*<sub>LP</sub>";
-    const cls = i => (xd[i] <= 1e-9 ? "ok" : "bad");
-    const top = [R.length ? "<i>h</i><sub>LP</sub>(<i>u</i>) =" : "<i>z</i><sub>LP</sub> =", `<i>c</i><sup>T</sup>${xsHtml}`];
-    const bot = ["", `<b>${fmt(xc)}</b>`];
-    // Each penalty term as  u_i · (A_i^T x(u) - b_i), one column per factor so the values line up.
-    R.forEach(i => {
+    const stk = cells => `<span class="stk">` +
+      cells.map(([v, e]) => `<span class="val">${v}</span><span>${e}</span>`).join("") + "</span>";
+    const lhs = stk([[`<b>${fmt(h)}</b>`, `<span class="lhs"><span${R.length ? "" : ' class="hid"'}><i>h</i><sub>LP</sub>(<i>u</i>) =</span>` +
+                `<span${R.length ? ' class="hid"' : ""}><i>z</i><sub>LP</sub> =</span></span>`]]);
+    // Both penalty terms and both constraints are always shown, in their constraint's colour; the inactive
+    // one of each pair (penalty of a kept constraint, constraint that is relaxed) is dimmed and struck through.
+    const inact = on => (on ? "" : " inactive");
+    const obj = [[`<b>${fmt(xc)}</b>`, `<i>c</i><sup>T</sup>${xsHtml}`]];
+    [0, 1].forEach(i => {
+      const n = `n${i + 1}`, pen = `<i>u</i><sub>${i + 1}</sub>(${slackHtml(i + 1, xsHtml)})`;
+      if (!R.includes(i)) { obj.push(["", `<span class="pl ${n} inactive">+ ${pen}</span>`]); return; }
       const v = xd[i], vs = fmt(v);
-      top.push("+", `<span class="n${i + 1}"><i>u</i><sub>${i + 1}</sub></span>`, "·", `<span class="${cls(i)}">(${slackHtml(i + 1, xsHtml)})</span>`);
-      bot.push("+", `<span class="n${i + 1}">${fmt(u[i])}</span>`, "·", `<span class="${cls(i)}">${v < -5e-3 ? `(${vs})` : vs}</span>`);
+      obj.push([`<span class="pl">+</span>`, `<span class="pl ${n}">+</span>`],
+               [`<span class="${n}">${fmt(u[i])}</span>`, `<span class="${n}"><i>u</i><sub>${i + 1}</sub></span>`],
+               ["·", ""],
+               [`<span class="${n}">${v < -5e-3 ? `(${vs})` : vs}</span>`, `<span class="${n}">(${slackHtml(i + 1, xsHtml)})</span>`]);
     });
-    top.push(""); bot.push(`= <b>${fmt(h)}</b>`);
-    const sum = `<div class="sum" style="grid-template-columns: repeat(${top.length}, auto)">` +
-      [...top, ...bot].map(c => `<span>${c}</span>`).join("") + "</div>";
-    readout.innerHTML = sum;
+    const stRows = [...[0, 1].map(i => [consHtml(i, xsHtml), ` n${i + 1}${inact(K.includes(i))}`]),
+                    [[xsHtml, "&nbsp;∈&nbsp;", "<i>X</i><sub>LP</sub>"], ""]];
+    const relaxBox = i => `<label class="relax"><input type="checkbox" class="relax${i + 1}" data-i="${i}"` +
+      `${R.includes(i) ? " checked" : ""}> Relax</label>`;
+    formula.innerHTML = `<div class="f">${fRow(lhs, stk([["&nbsp;", `<span class="under"><span>min</span><i>x</i></span>`]]), stk(obj))}` +
+      stRows.map(([r, cls], n) => fRow("", n === 0 ? "s. t." : "", r, n < 2 ? relaxBox(n) : "", cls)).join("") + "</div>";
 
     curOpt = opt;
     renderDual(R, P, u, best, h, sub);
