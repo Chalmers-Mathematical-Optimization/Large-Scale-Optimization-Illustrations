@@ -29,7 +29,8 @@
   or a map over (u_1, u_2) coloured by the optimal extreme point (both relaxed).
 
   Embed with e.g.  <iframe src="lagrangean-relaxation.html?u1=0.8&u2=0.5" width="760" height="1100"></iframe>
-  Optional URL parameters: lp=1 | 2 (which LP, as in the dropdown at the top; default 1), u1, u2 (initial prices; u sets both), relax=12 | 1 | 2 | none
+  Optional URL parameters: lp=1 | 2 | custom (which LP, as in the dropdown at the top; default 1),
+  lpdef=<custom LP> (as made with "Edit LP": c1,c2|a1,a2,le|ge,b|a1,a2,le|ge,b|p1,p2|p1,p2|..., see specParam), u1, u2 (initial prices; u sets both), relax=12 | 1 | 2 | none
   (default: none, or the constraints whose price is given),
   dual=0 (hide the dual-function panel), labels=1 (start with all of the figure's labels shown;
   by default a label appears while hovering over its object), theme=auto | light | dark (as in the Theme dropdown; auto, the default, follows the system setting;
@@ -90,6 +91,29 @@
   .lpchoice select { max-width: 100%; padding: 3px 6px; border: 1px solid var(--grid); border-radius: 6px;
                      background: var(--bg); color: var(--fg); font: inherit; cursor: pointer; }
   .lpchoice select:hover { border-color: var(--axis); }
+  .lpchoice button, .lpeditor button { margin-left: 6px; padding: 3px 10px; border: 1px solid var(--grid); border-radius: 6px;
+                     background: var(--bg); color: var(--fg); font: inherit; cursor: pointer; }
+  .lpchoice button:hover, .lpeditor button:hover { border-color: var(--axis); }
+  /* "Edit LP": a form with the LP's numbers */
+  .lpeditor { margin: 4px 0 8px; padding: 8px 10px; border: 1px solid var(--grid); border-radius: 6px; font-size: 0.95rem; }
+  .lpeditor[hidden] { display: none; }
+  .lpform { display: grid; grid-template-columns: auto 1fr; align-items: baseline; gap: 6px 10px; }
+  .lpform .row, .lppts { font-family: var(--math-font); }
+  .lpeditor .op { font-family: var(--math-font); color: var(--muted); }
+  .lpeditor input { box-sizing: border-box; width: 4.2em; padding: 2px 4px; border: 1px solid var(--axis); border-radius: 4px;
+                    background: var(--bg); color: var(--fg); font: 0.9rem var(--text-font); text-align: right; }
+  .lpeditor input.bad { border-color: var(--neg); outline: 1px solid var(--neg); }
+  .lpeditor .row.n1 input, .lpeditor .row.n1 select { border-color: var(--n1); }
+  .lpeditor .row.n2 input, .lpeditor .row.n2 select { border-color: var(--n2); }
+  .lpeditor select { padding: 1px 2px; border: 1px solid var(--axis); border-radius: 4px; background: var(--bg); color: var(--fg); font: inherit; }
+  .lppts { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; margin-top: 8px; }
+  .lppts .pt { white-space: nowrap; }
+  .lpeditor button.del, .lpeditor button.add { margin-left: 2px; padding: 0 5px; line-height: 1.2; font-size: 0.85rem; color: var(--muted); }
+  .lpeditor button.del:hover:not(:disabled), .lpeditor button.add:hover { color: var(--fg); }
+  .lpeditor button:disabled { opacity: 0.35; cursor: not-allowed; }
+  .lpeditor .lpbtns { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .lpeditor .lpbtns button { margin-left: 0; }
+  .lpeditor .lperror { color: var(--neg); }
   /* Room for the system (values, objective, 2 constraints, x ∈ X_LP), so the page doesn't jump */
   .formula { display: flex; justify-content: safe center; align-items: flex-start; font-size: 1.05rem; margin: 4px 0 8px; line-height: 1.6; min-height: calc(5 * 1.6em); }
   /* Columns: lhs | min / s. t. | left side | relation | right side | relax checkbox. No column gap, so a
@@ -183,11 +207,13 @@
   /* the choice of LP and the written-out LP across both columns, centred on the page */
   .wrap.horizontal > .top { grid-column: 1 / -1; }
   .wrap.horizontal .lpchoice { margin: 2px 76px 4px; text-align: center; }
+  .wrap.horizontal .lpeditor { max-width: 720px; margin: 4px auto 8px; }
   @media (min-width: 1000px) {
     .wrap.auto { max-width: 1520px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 28px; }
     .wrap.auto > .dual { align-self: center; margin-top: 0; border-top: 0; padding-top: 0; }
     .wrap.auto > .top { grid-column: 1 / -1; }
     .wrap.auto .lpchoice { margin: 2px 76px 4px; text-align: center; }
+    .wrap.auto .lpeditor { max-width: 720px; margin: 4px auto 8px; }
   }
   #dualfig { touch-action: none; cursor: crosshair; }
   #dualfig.rotate { cursor: grab; }
@@ -207,7 +233,15 @@
        href="https://chalmers-mathematical-optimization.github.io/Large-Scale-Optimization-Illustrations/Lagrangean%20Relaxation.html">↗</a>
   </div>
   <div class="top">
-  <div class="lpchoice"><label>LP: <select id="lpSelect"></select></label></div>
+  <div class="lpchoice"><label>LP: <select id="lpSelect"></select></label>
+    <button type="button" id="lpEdit">Edit LP</button></div>
+  <div class="lpeditor" id="lpEditor" hidden>
+    <div class="lpform" id="lpForm"></div>
+    <div class="lppts" id="lpPts"><span class="op"><i>X</i><sub>LP</sub> = conv</span>
+      <button type="button" id="lpAddPt" class="add" title="Add a point" aria-label="Add a point">+</button></div>
+    <div class="lpbtns"><button type="button" id="lpApply">Apply</button><button type="button" id="lpClose">Close</button>
+      <span class="lperror" id="lpError" role="alert"></span></div>
+  </div>
   <div class="formula" id="formula"></div>
   </div>
   <div class="main">
@@ -268,7 +302,8 @@
 (() => {
   // ---------------------------------------------------------------- CONFIG
   // Coordinates are in problem space; the view uses equal scaling on both axes.
-  const VIEW = { xmin: -2.6, xmax: 10.4, ymin: -1.6, ymax: 8.4 };  // 13 x 10 units, 720 px wide
+  // View of the built-in LPs; a custom LP gets a view of the same shape fitted to it (autoView).
+  const VIEW0 = { xmin: -2.6, xmax: 10.4, ymin: -1.6, ymax: 8.4 };  // 13 x 10 units, 720 px wide
   // The LPs to choose between (dropdown at the top, or ?lp=1, 2, ...). For each:
   //   XLP:  vertices of X_LP, in order;  C: objective (minimise c^T x), drawn from the origin.
   //   Label positions are preferences: labels move to nearby free spots to avoid overlaps.
@@ -277,6 +312,7 @@
   //   CONS: relaxed constraints A_i^T x <= b_i, used as written; A_i (a) is the normal pointing out of the
   //   feasible side. The normal is drawn from the midpoint of the line's segment on the boundary of the
   //   unrelaxed feasible region X_LP ∩ {A_i^T x <= b_i for all i}. labelAt/anchor: fixed label spot.
+  //   XLP_LABEL, XLP_OPT_LABEL and labelAt may be left out (as for a custom LP): autoLabels() picks them.
   const LPS = [
     {
       name: "Optimum in the interior of X_LP",
@@ -307,15 +343,17 @@
 
   const NS = "http://www.w3.org/2000/svg";
   const svg = document.getElementById("fig");
-  const W = 720, S0 = W / (VIEW.xmax - VIEW.xmin), H = (VIEW.ymax - VIEW.ymin) * S0;
+  const W = 720, H = (VIEW0.ymax - VIEW0.ymin) * W / (VIEW0.xmax - VIEW0.xmin);
   // Current view. The figure keeps its pixel size; when arrows or boxes need more room than VIEW,
-  // fitView() zooms out (S < S0) so that everything fits.
+  // fitView() zooms out (S < S0) so that everything fits. VIEW, S0 and UNIT (a round length about 1/13 of
+  // the view's width: 1 for VIEW0, the grid step and the scale of lengths in problem units) are set by useLP.
+  let VIEW = VIEW0, S0 = W / (VIEW.xmax - VIEW.xmin), UNIT = 1;
   let S = S0, vx0 = VIEW.xmin, vy1 = VIEW.ymax;
   const viewRect = () => ({ xmin: vx0, xmax: vx0 + W / S, ymin: vy1 - H / S, ymax: vy1 });
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
   const px = p => [(p[0] - vx0) * S, (vy1 - p[1]) * S];
   function fitView(points) {
-    const m = 0.5;                                                 // margin (problem units)
+    const m = 0.5 * UNIT;                                          // margin (problem units)
     const B = { ...VIEW };
     points.forEach(([x, y]) => {
       B.xmin = Math.min(B.xmin, x - m); B.xmax = Math.max(B.xmax, x + m);
@@ -332,11 +370,26 @@
   const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
   const VCOL = j => `var(--v${j % 8})`;
 
-  // The current LP (see LPS) and what is derived from it; set by useLP.
-  let lpIndex, XLP, C, XLP_LABEL, XLP_OPT_LABEL, CONS, zLP, xLP, cen;
+  // The current LP (LPS[lpIndex], or customLP when lpIndex is "custom") and what is derived from it; set by useLP.
+  let lpIndex, XLP, C, XLP_LABEL, XLP_OPT_LABEL, CONS, zLP, xLP, cen, customLP = null;
+  // Round length near v: 1, 2 or 5 times a power of 10.
+  const niceLen = v => { const p = 10 ** Math.floor(Math.log10(v)), f = v / p; return p * (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10); };
+  // View of a custom LP: X_LP, the origin (c is drawn from it) and the feet of the normals, with a margin,
+  // widened to the shape of VIEW0. (c itself may run off the view, as long arrows do.)
+  function autoView() {
+    const P = [...XLP, [0, 0], ...CONS.map(k => k.foot)];
+    const xs = P.map(p => p[0]), ys = P.map(p => p[1]);
+    let x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    const asp = (VIEW0.xmax - VIEW0.xmin) / (VIEW0.ymax - VIEW0.ymin);
+    const m = 0.12 * Math.max(x1 - x0, (y1 - y0) * asp);
+    x0 -= m; x1 += m; y0 -= m; y1 += m;
+    const w = Math.max(x1 - x0, (y1 - y0) * asp), cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+    return { xmin: cx - w / 2, xmax: cx + w / 2, ymin: cy - w / asp / 2, ymax: cy + w / asp / 2 };
+  }
   function useLP(n) {
     lpIndex = n;
-    ({ XLP, C, XLP_LABEL, XLP_OPT_LABEL, CONS } = LPS[n]);
+    const lp = n === "custom" ? customLP : LPS[n];
+    ({ XLP, C, CONS } = lp);
     for (const k of CONS) {
       k.n = Math.hypot(k.a[0], k.a[1]);          // ||a||
       k.e = scale(1 / k.n, k.a);                  // unit normal, for geometry only
@@ -361,9 +414,12 @@
     zLP = Math.min(...feas.map(v => dot(C, v)));
     xLP = feas.find(v => dot(C, v) === zLP);
     cen = scale(1 / XLP.length, XLP.reduce(add, [0, 0]));
+    VIEW = n === "custom" ? autoView() : VIEW0;
+    S0 = S = W / (VIEW.xmax - VIEW.xmin); vx0 = VIEW.xmin; vy1 = VIEW.ymax;
+    UNIT = niceLen((VIEW.xmax - VIEW.xmin) / 13);
+    autoLabels(lp);
+    ({ XLP_LABEL, XLP_OPT_LABEL } = lp);
   }
-  const lpParam = parseInt(new URLSearchParams(location.search).get("lp"), 10);
-  useLP(lpParam >= 1 && lpParam <= LPS.length ? lpParam - 1 : 0);
 
   function el(tag, attrs, parent) {
     const e = document.createElementNS(NS, tag);
@@ -555,7 +611,7 @@
   // Line {x : n^T x = v} through the whole view, as two far-apart points.
   const lineThrough = (n, v) => {
     const p0 = scale(v, n), d = [-n[1], n[0]];
-    return [add(p0, scale(-400, d)), add(p0, scale(400, d))];
+    return [add(p0, scale(-400 * UNIT, d)), add(p0, scale(400 * UNIT, d))];
   };
 
   // Lagrangean value of each extreme point v of the subproblem domain:
@@ -645,7 +701,7 @@
   // Grid (1 unit; coarser when zoomed out) and axes, redrawn for the current view.
   function drawGrid() {
     stat.replaceChildren();
-    const V = viewRect(), g = S >= 25 ? 1 : S >= 10 ? 2 : 5;
+    const V = viewRect(), g = UNIT * (S * UNIT >= 25 ? 1 : S * UNIT >= 10 ? 2 : 5);
     for (let x = Math.ceil(V.xmin / g) * g; x <= V.xmax; x += g) {
       const [a] = px([x, 0]);
       el("line", { x1: a, y1: 0, x2: a, y2: H, "stroke-width": 1 }, stat).style.stroke = "var(--grid)";
@@ -680,6 +736,52 @@
     const [x, y] = px(p);
     return [[x + (anchor === "start" ? L.w / 2 : anchor === "end" ? -L.w / 2 : 0), y - 0.33 * L.fs]];
   };
+
+  // Label spots an LP leaves out (a custom LP), chosen once in the normal view with the same costs as the
+  // label placement, against X_LP, the constraint lines and the axes:
+  //   constraint i: beside its line, preferably near the ends of the visible part and outside X_LP;
+  //   X_LP: inside X_LP, preferably where it violates a constraint (as for the built-in LPs);
+  //   x*_LP: preferably away from X_LP's centre.
+  function autoLabels(lp) {
+    const V = viewRect(), lines = CONS.map(k => lineThrough(k.e, k.b / k.n));
+    const obstacles = () => {
+      scene.segs = []; scene.dots = [];
+      XLP.forEach((v, n) => obSeg(v, XLP[(n + 1) % XLP.length], 2));
+      lines.forEach(([p, q]) => obSeg(p, q, 2));
+      obSeg([V.xmin, 0], [V.xmax, 0], 0.5); obSeg([0, V.ymin], [0, V.ymax], 0.5);
+      obDot([0, 0], 4, 30); obDot(xLP, 11, 80);
+    };
+    const size = (parts, fs) => ({ fs, w: textWidth(parts, fs), h: fs * 1.3 });
+    const xlpPx = XLP.map(px), inside = b => [[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]].every(q => inConvex(xlpPx, q));
+    obstacles();
+    CONS.forEach((k, i) => {
+      if (k.labelAt) return;
+      const j = String(i + 1), L = size([["A", "it"], [j, "sub"], ["T", "sup"], ["x", "it"], [" ≤ ", ""], ["b", "it"], [j, "sub"]], 17);
+      let best = null;
+      beside(...lines[i], 6, L, [0.08, 0.92, 0.15, 0.85, 0.25, 0.75, 0.4, 0.6]).forEach(([cx, cy], n) => {
+        const b = boxAt(cx, cy, L), c = cost(b) + 3 * n + (inConvex(xlpPx, [cx, cy]) ? 150 : 0);
+        if (!best || c < best.c) best = { c, cx, cy, b };
+      });
+      scene.boxes.push(best.b);
+      k.labelAt = ipx([best.cx - L.w / 2, best.cy + 0.33 * L.fs]); k.anchor = "start";
+    });
+    if (!lp.XLP_LABEL) {
+      // Grid of candidate centres over X_LP; boxes must lie inside it.
+      const L = size([["X", "it"], ["LP", "sub"]], 22), xs = xlpPx.map(p => p[0]), ys = xlpPx.map(p => p[1]);
+      const viol = q => CONS.some(k => dot(k.a, ipx(q)) > k.b);
+      let best = null;
+      for (let a = 1; a < 16; a++) for (let b2 = 1; b2 < 16; b2++) {
+        const q = [Math.min(...xs) + a / 16 * (Math.max(...xs) - Math.min(...xs)), Math.min(...ys) + b2 / 16 * (Math.max(...ys) - Math.min(...ys))];
+        const b = boxAt(...q, L);
+        if (!inside(b)) continue;
+        const c = cost(b) + (viol(q) ? 0 : 40) + 0.05 * Math.hypot(...px(cen).map((v, n) => v - q[n]));
+        if (!best || c < best.c) best = { c, q };
+      }
+      lp.XLP_LABEL = ipx(best ? best.q : px(cen));
+    }
+    if (!lp.XLP_OPT_LABEL) lp.XLP_OPT_LABEL = [xLP[0] - cen[0], xLP[1] - cen[1]];
+    scene.segs = []; scene.dots = []; scene.boxes = [];
+  }
 
   // ---------------------------------------------------------------- dynamic layer
   const dyn = el("g", { "clip-path": "url(#view)" });
@@ -929,7 +1031,7 @@
           obSeg(p0, add(p0, scale(w, t)), 1.5);
         });
         // Label the side lying on the constraint line (length u_i ||A_i||), preferably outside the box.
-        if (w > 0.3) {
+        if (w > 0.3 * UNIT) {
           boxLabels.push(() => want([["u", "it"], [j, "it-sub"], [" ‖", ""], ["A", "it"], [j, "sub"], ["‖", ""]], { class: "small", "data-lab": "side" + j },
             L => beside(F, add(F, scale(w, t)), 4, L, [0.5, 0.3, 0.7, 0.15, 0.85], sdir(scale(-dist, k.e)))));
         }
@@ -1021,12 +1123,12 @@
     });
     want([["X", "it"], ["LP", "sub"]], { "font-size": 22, "data-lab": "X_LP" }, () => [px(XLP_LABEL)]);
     want([["c", "it"]], { "data-lab": "c" }, L => beside(O, C, 4, L));
-    if (Math.hypot(cu[0] - C[0], cu[1] - C[1]) > 0.08) {
+    if (Math.hypot(cu[0] - C[0], cu[1] - C[1]) > 0.08 * UNIT) {
       want([["c", "it"], ...R.flatMap(i => [[" + ", ""], ["u", "it"], [String(i + 1), "it-sub"], ["A", "it"], [String(i + 1), "sub"]])], { "data-lab": "res" },
            L => beside(O, tip, 5, L));
     }
     // Normal labels: past the arrow tip, else beside the arrow.
-    R.filter(i => vecsOn && u[i] * CONS[i].n > 0.08).forEach(i => {
+    R.filter(i => vecsOn && u[i] * CONS[i].n > 0.08 * UNIT).forEach(i => {
       const k = CONS[i], tipN = add(k.foot, scale(u[i], k.a));
       want([["u", "it"], [String(i + 1), "it-sub"], [" A", "it"], [String(i + 1), "sub"]], { class: "small", "data-lab": "n" + (i + 1) },
            L => [...around(tipN, 5, L, sdir(k.a), 5), ...beside(k.foot, tipN, 4, L).map((c, n) => [...c, 15 + 3 * n])]);
@@ -1564,8 +1666,71 @@
   });
   ["pointerup", "pointercancel"].forEach(t => dsvg.addEventListener(t, () => { dragging = false; rotating = null; moving3d = false; }));
 
-  // URL parameters: u (both prices), u1, u2, relax=12|1|2|none, dual=0.
+  // ---------------------------------------------------------------- custom LP
+  // Made in the "Edit LP" form (or given by ?lpdef=) as a spec:
+  //   { c: [c1, c2], cons: [{ a: [a1, a2], rel: "<=" | ">=", b }, (constraint 2)], pts: [[p1, p2], ...] }
+  // where X_LP is the convex hull of pts. In the URL: lpdef=c1,c2|a1,a2,le|ge,b|a1,a2,le|ge,b|p1,p2|p1,p2|...
+  const fmtNum = v => String(+v.toFixed(4));
+  // Spec of an LP, for filling in the form: the custom LP's own, else from the LP's data (constraints as <=).
+  const specOf = lp => lp.spec ?? { c: lp.C.slice(), cons: lp.CONS.map(k => ({ a: k.a.slice(), rel: "<=", b: k.b })),
+                                    pts: lp.XLP.map(v => v.slice()) };
+  const urlNum = v => String(+v.toPrecision(10));
+  const specParam = sp => [sp.c.map(urlNum).join(","),
+    ...sp.cons.map(k => [...k.a.map(urlNum), k.rel === ">=" ? "ge" : "le", urlNum(k.b)].join(",")),
+    ...sp.pts.map(p => p.map(urlNum).join(","))].join("|");
+  function paramSpec(s) {
+    const g = s.split("|").map(t => t.split(","));
+    const num = t => { const v = parseFloat(t); if (!Number.isFinite(v)) throw new Error("The custom LP in the link is malformed."); return v; };
+    if (g.length < 3 || g[0].length !== 2 || g[1].length !== 4 || g[2].length !== 4 || g.slice(3).some(p => p.length !== 2))
+      throw new Error("The custom LP in the link is malformed.");
+    return { c: g[0].map(num), cons: [g[1], g[2]].map(k => ({ a: [num(k[0]), num(k[1])], rel: k[2] === "ge" ? ">=" : "<=", b: num(k[3]) })),
+             pts: g.slice(3).map(p => p.map(num)) };
+  }
+  // Convex hull (counter-clockwise), and a polygon without repeated or collinear vertices.
+  function hull(P) {
+    const pts = [...P].sort((p, q) => p[0] - q[0] || p[1] - q[1]);
+    const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+    const half = list => list.reduce((h, p) => {
+      while (h.length >= 2 && cross(h[h.length - 2], h[h.length - 1], p) <= 1e-12) h.pop();
+      h.push(p); return h;
+    }, []);
+    const lo = half(pts), hi = half([...pts].reverse());
+    return [...lo.slice(0, -1), ...hi.slice(0, -1)];
+  }
+  const cleanPoly = P => {
+    const ext = Math.max(1e-300, ...P.flat().map(Math.abs)), tol = 1e-9 * ext;
+    let Q = P.filter((p, n) => Math.hypot(p[0] - P[(n + 1) % P.length][0], p[1] - P[(n + 1) % P.length][1]) > tol);
+    if (Q.length < 3) return Q;
+    return Q.filter((p, n) => {
+      const a = Q[(n + Q.length - 1) % Q.length], b = Q[(n + 1) % Q.length];
+      return Math.abs((p[0] - a[0]) * (b[1] - a[1]) - (p[1] - a[1]) * (b[0] - a[0])) > tol * tol;
+    });
+  };
+  const area = P => Math.abs(P.reduce((s2, p, n) => s2 + p[0] * P[(n + 1) % P.length][1] - p[1] * P[(n + 1) % P.length][0], 0)) / 2;
+
+  // Spec -> LP object (as in LPS), or an Error with a message for the reader.
+  function buildLP(sp) {
+    const cons = sp.cons.map((k, i) => {
+      if (Math.hypot(...k.a) < 1e-12) throw new Error(`Constraint ${i + 1} has no x1 or x2 term.`);
+      return k.rel === ">=" ? { a: k.a.map(v => -v), b: -k.b } : { a: k.a.slice(), b: k.b };   // as A_i^T x <= b_i
+    });
+    if (sp.pts.length < 3) throw new Error("X_LP needs at least three points.");
+    const XLPn = cleanPoly(hull(sp.pts));
+    if (XLPn.length < 3 || area(XLPn) < 1e-9 * Math.max(...XLPn.flat().map(Math.abs), 1) ** 2)
+      throw new Error("X_LP has no interior: the points lie on a line.");
+    if (!cons.reduce((P, k) => cleanPoly(clip(P, k.a, k.b)), XLPn).length)
+      throw new Error("No point of X_LP satisfies both constraints, so the LP has no solution.");
+    return { name: "Custom", spec: sp, XLP: XLPn, C: sp.c.slice(), CONS: cons };
+  }
+
+  // URL parameters: u (both prices), u1, u2, relax=12|1|2|none, dual=0, lp=1|2|custom, lpdef=<custom LP>.
   const params = new URLSearchParams(location.search);
+  let loadError = null, loadSpec = null;
+  if (params.has("lpdef")) {
+    try { loadSpec = paramSpec(params.get("lpdef")); customLP = buildLP(loadSpec); } catch (e) { loadError = e.message; }
+  }
+  const lpParam = params.get("lp"), lpNum = parseInt(lpParam, 10);
+  useLP(lpParam === "custom" && customLP ? "custom" : lpNum >= 1 && lpNum <= LPS.length ? lpNum - 1 : 0);
   sliders.forEach((s, i) => {
     const v = parseFloat(params.get("u" + (i + 1)) ?? params.get("u"));
     if (Number.isFinite(v)) { s.max = "1000"; s.value = String(Math.max(v, 0)); }   // clamped in render()
@@ -1709,20 +1874,93 @@
     render();
   });
   // Choice of LP. Switching keeps which constraints are relaxed but starts the prices at 0; the choice
-  // is kept in the URL (?lp=) so that reloading or sharing the link shows the same LP.
+  // is kept in the URL (?lp=, and the custom LP in ?lpdef=) so that reloading or sharing the link
+  // shows the same LP. "Edit LP" opens a form filled in with the current LP; applying it makes it the custom LP.
   const lpSelect = document.getElementById("lpSelect");
   LPS.forEach((lp, n) => lpSelect.add(new Option(`${n + 1}. ${lp.name}`, String(n))));
+  const customOpt = new Option("Custom", "custom");
+  if (customLP) lpSelect.add(customOpt);
   lpSelect.value = String(lpIndex);
-  lpSelect.addEventListener("change", () => {
-    useLP(+lpSelect.value);
+  function switchLP(n) {
+    useLP(n);
     sliders.forEach(s => { s.step = "0.01"; s.value = "0"; });
     tieKey = null; tieShape = null; lastSlot.clear();
     const q = new URLSearchParams(location.search);
-    q.set("lp", String(lpIndex + 1));
+    q.set("lp", n === "custom" ? "custom" : String(n + 1));
+    if (customLP) q.set("lpdef", specParam(customLP.spec));
     ["u", "u1", "u2"].forEach(k => q.delete(k));                     // the prices were reset
     try { history.replaceState(null, "", "?" + q); } catch (e) { /* e.g. sandboxed frame */ }
     render();
+  }
+  lpSelect.addEventListener("change", () => switchLP(lpSelect.value === "custom" ? "custom" : +lpSelect.value));
+
+  // The form: min c1 x1 + c2 x2, the two constraints (a1 x1 + a2 x2, <= or >=, b), and the points whose
+  // convex hull is X_LP (× removes one, at least three are kept; + adds one).
+  const lpEditor = document.getElementById("lpEditor"), lpForm = document.getElementById("lpForm");
+  const lpPts = document.getElementById("lpPts"), lpError = document.getElementById("lpError");
+  const xv = j => `<i>x</i><sub>${j}</sub>`;
+  const numIn = (v, label) => `<input type="text" inputmode="decimal" value="${v === "" ? "" : fmtNum(v)}" aria-label="${label}">`;
+  const syncDel = () => {
+    const rows = lpPts.querySelectorAll(".pt");
+    rows.forEach(r => { r.querySelector("button").disabled = rows.length <= 3; });
+  };
+  function addPoint(p = ["", ""]) {
+    const n = lpPts.querySelectorAll(".pt").length + 1, row = document.createElement("span");
+    row.className = "pt";
+    row.innerHTML = `(${numIn(p[0], `point ${n}, x1`)}, ${numIn(p[1], `point ${n}, x2`)})` +
+      `<button type="button" class="del" title="Remove this point" aria-label="Remove point">×</button>`;
+    row.querySelector("button").addEventListener("click", () => { row.remove(); syncDel(); });
+    lpPts.insertBefore(row, document.getElementById("lpAddPt"));
+    syncDel();
+    return row;
+  }
+  function openEditor(sp, err) {
+    const coef = (v, j, label) => `${numIn(v, `${label}, coefficient of x${j}`)} ${xv(j)}`;
+    lpForm.innerHTML =
+      `<span class="op">min</span><span class="row">${coef(sp.c[0], 1, "objective")} + ${coef(sp.c[1], 2, "objective")}</span>` +
+      sp.cons.map((k, i) => `<span class="op">${i ? "" : "s. t."}</span><span class="row n${i + 1}" data-i="${i}">` +
+        `${coef(k.a[0], 1, `constraint ${i + 1}`)} + ${coef(k.a[1], 2, `constraint ${i + 1}`)} ` +
+        `<select aria-label="constraint ${i + 1}, relation"><option value="<="${k.rel === ">=" ? "" : " selected"}>≤</option>` +
+        `<option value=">="${k.rel === ">=" ? " selected" : ""}>≥</option></select> ${numIn(k.b, `constraint ${i + 1}, right-hand side`)}</span>`).join("");
+    lpPts.querySelectorAll(".pt").forEach(r => r.remove());
+    sp.pts.forEach(p => addPoint(p));
+    lpError.textContent = err || "";
+    lpEditor.hidden = false;
+  }
+  // The form's values as a spec; an unreadable field is marked and throws.
+  function readForm() {
+    const num = inp => {
+      const t = inp.value.trim().replace(/[−–]/g, "-"), f = t.split("/");
+      const v = f.length <= 2 && f.every(s => /^[+-]?(\d+\.?\d*|\.\d+)$/.test(s.trim())) ? f.map(Number).reduce((p, q) => p / q) : NaN;
+      inp.classList.toggle("bad", !Number.isFinite(v));
+      if (!Number.isFinite(v)) { inp.focus(); throw new Error(t ? `Not a number: “${t}”.` : "A field is empty."); }
+      return v;
+    };
+    const rows = [...lpForm.querySelectorAll(".row")], ins = r => [...r.querySelectorAll("input")];
+    const c = ins(rows[0]).map(num);
+    const cons = rows.slice(1).map(r => { const [a1, a2, b] = ins(r).map(num); return { a: [a1, a2], rel: r.querySelector("select").value, b }; });
+    const pts = [...lpPts.querySelectorAll(".pt")].map(r => ins(r).map(num));
+    return { c, cons, pts };
+  }
+  document.getElementById("lpEdit").addEventListener("click", () => {
+    if (lpEditor.hidden) openEditor(specOf(lpIndex === "custom" ? customLP : LPS[lpIndex]));
+    else lpEditor.hidden = true;
   });
+  document.getElementById("lpClose").addEventListener("click", () => { lpEditor.hidden = true; });
+  document.getElementById("lpAddPt").addEventListener("click", () => addPoint().querySelector("input").focus());
+  const applyLP = () => {
+    let lp;
+    lpEditor.querySelectorAll(".bad").forEach(i => i.classList.remove("bad"));
+    try { lp = buildLP(readForm()); } catch (e) { lpError.textContent = e.message; return; }
+    lpError.textContent = "";
+    customLP = lp;
+    if (!customOpt.parentNode) lpSelect.add(customOpt);
+    lpSelect.value = "custom";
+    switchLP("custom");
+  };
+  document.getElementById("lpApply").addEventListener("click", applyLP);
+  lpEditor.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.matches("input")) { e.preventDefault(); applyLP(); } });
+  if (loadError) openEditor(loadSpec ?? specOf(LPS[lpIndex]), loadError);
   // Theme: ?theme= wins, then the viewer's last choice (this browser only), else Auto, which follows the
   // system's light/dark setting (and its changes).
   const optTheme = document.getElementById("optTheme");
