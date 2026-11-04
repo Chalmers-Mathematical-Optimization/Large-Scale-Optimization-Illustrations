@@ -28,8 +28,8 @@
   (default: none, or the constraints whose price is given),
   dual=0 (hide the dual-function panel), labels=1 (start with all of the figure's labels shown,
   except the coordinates of x(u); or a comma-separated list of label groups: points, constraints, xlp,
-  objective, vectors, axes, coords; by default a label appears while hovering over its object), theme=auto | light | dark (as in the Theme dropdown; auto, the default, follows the system setting;
-  e.g. theme=light to force light mode inside Canvas), layout=auto | vertical | horizontal (dual-function panel below the figure,
+  objective, vectors, axes, coords; by default a label appears while hovering over its object), canvas or canvas=1 (for embedding
+  in Canvas: start in light mode and show a "View as standalone" button linking to the GitHub Pages copy), layout=auto | vertical | horizontal (dual-function panel below the figure,
   or beside it; auto, the default, puts it beside the figure when the window is wide enough; side=1 is
   an alias for horizontal), map=3d | vertex | value (3-D graph, the default; or a 2-D map coloured by optimal extreme point or by the value of h_LP).
   Geometry is set in the CONFIG block in the script below.
@@ -61,7 +61,7 @@
     --v0: #e8a317; --v1: #2f6fe0; --v2: #d6457a; --v3: #3fa34d;
     --v4: #8e3fb8; --v5: #1fb5c4; --v6: #a8552a; --v7: #6f6f78;
   }
-  /* data-theme is set by the script: the Theme dropdown, or ?theme=; Auto follows prefers-color-scheme. */
+  /* data-theme is set by the script: the Theme dropdown, or ?canvas (light); Auto follows prefers-color-scheme. */
   :root[data-theme="dark"] {
     --bg: #17171b; --fg: #ececf1; --muted: #a0a0ab; --grid: #26262c; --axis: #5c5c66;
     --xlp-fill: #1f2a3d; --xlp-stroke: #7d9bd1; --feas-fill: #2f4466; --cons: #b5b5bf;
@@ -79,14 +79,17 @@
   .formula, .uval, .controls label[for], svg text, .wrap i, .wrap sub, .wrap sup { font-family: var(--math-font); }
   .formula label.relax { font-family: var(--text-font); font-size: 0.9em; }
   .wrap { position: relative; max-width: 760px; margin: 0 auto; padding: 12px 16px; box-sizing: border-box; }
-  /* Top-right corner: link to the standalone page */
+  /* Top-right corner: link to the standalone page (only with ?canvas=1) */
   .corner { position: absolute; top: 8px; right: 12px; z-index: 1; display: flex; gap: 6px; }
-  .cbtn { box-sizing: border-box; width: 30px; height: 30px; padding: 0; display: inline-flex; align-items: center;
+  .corner[hidden] { display: none; }
+  .cbtn { box-sizing: border-box; height: 30px; padding: 0 10px; display: inline-flex; align-items: center;
           justify-content: center; border: 1px solid var(--grid); border-radius: 6px; background: var(--bg);
-          color: var(--muted); font: inherit; font-size: 16px; line-height: 1; text-decoration: none; cursor: pointer; }
+          color: var(--muted); font: inherit; font-size: 0.85rem; line-height: 1; white-space: nowrap;
+          text-decoration: none; cursor: pointer; }
   .cbtn:hover { color: var(--fg); border-color: var(--axis); }
-  /* Choice of LP, top left (clear of the corner buttons) */
-  .lpchoice { margin: 2px 40px 4px 0; font-size: 0.95rem; color: var(--muted); }
+  /* Choice of LP, top left (clear of the corner button when it is shown) */
+  .lpchoice { margin: 2px 0 4px 0; font-size: 0.95rem; color: var(--muted); }
+  :root.canvas .lpchoice { margin-right: 150px; }
   .lpchoice { display: flex; flex-wrap: wrap; gap: 6px; }
   .lpchoice button, .lpeditor button { padding: 3px 10px; border: 1px solid var(--grid); border-radius: 6px;
                      background: var(--bg); color: var(--fg); font: inherit; cursor: pointer; }
@@ -250,9 +253,9 @@
 </head>
 <body>
 <div class="wrap" id="page">
-  <div class="corner">
-    <a class="cbtn" target="_blank" rel="noopener" title="Open in a new tab (GitHub Pages)" aria-label="Open in a new tab (GitHub Pages)"
-       href="https://chalmers-mathematical-optimization.github.io/Large-Scale-Optimization-Illustrations/Lagrangean%20Relaxation.html">↗</a>
+  <div class="corner" id="corner" hidden>
+    <a class="cbtn" target="_blank" rel="noopener" title="Open in a new tab (GitHub Pages)"
+       href="https://chalmers-mathematical-optimization.github.io/Large-Scale-Optimization-Illustrations/Lagrangean%20Relaxation.html">View as standalone</a>
   </div>
   <div class="top">
   <div class="lpchoice" id="lpChoice" role="group" aria-label="LP">
@@ -2045,8 +2048,11 @@
   document.getElementById("lpApply").addEventListener("click", applyLP);
   lpEditor.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.matches("input")) { e.preventDefault(); applyLP(); } });
   if (loadError) openEditor(loadSpec ?? specOf(LPS[lpIndex]), loadError);
-  // Theme: ?theme= wins, then the viewer's last choice (this browser only), else Auto, which follows the
-  // system's light/dark setting (and its changes).
+  // ?canvas=1 (embedded in Canvas): light mode, and the link to the standalone page. Otherwise the theme is
+  // the viewer's last choice (this browser only), else Auto, which follows the system's light/dark setting.
+  const canvas = params.has("canvas") && params.get("canvas") !== "0";
+  document.documentElement.classList.toggle("canvas", canvas);
+  document.getElementById("corner").hidden = !canvas;
   const optTheme = document.getElementById("optTheme");
   const darkMQ = window.matchMedia("(prefers-color-scheme: dark)");
   const applyTheme = () => {
@@ -2054,8 +2060,8 @@
     document.documentElement.setAttribute("data-theme", t);
   };
   const isTheme = t => ["auto", "light", "dark"].includes(t);
-  let theme = params.get("theme");
-  if (!isTheme(theme)) {
+  let theme = canvas ? "light" : null;
+  if (!theme) {
     try { theme = localStorage.getItem("lagrangean-theme"); } catch (e) { theme = null; }
   }
   optTheme.value = isTheme(theme) ? theme : "auto";
