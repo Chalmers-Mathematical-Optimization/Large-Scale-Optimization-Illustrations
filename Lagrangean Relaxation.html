@@ -32,7 +32,9 @@
   Optional URL parameters: lp=1 | 2 (which LP, as in the dropdown at the top; default 1), u1, u2 (initial prices; u sets both), relax=12 | 1 | 2 | none
   (default: none, or the constraints whose price is given),
   dual=0 (hide the dual-function panel), labels=1 (start with all of the figure's labels shown;
-  by default a label appears while hovering over its object), theme=dark (default light), side=1 (dual-function panel beside the figure), map=3d | vertex | value (3-D graph, the default; or a 2-D map coloured by optimal extreme point or by the value of h_LP).
+  by default a label appears while hovering over its object), theme=dark (default light), layout=auto | vertical | horizontal (dual-function panel below the figure,
+  or beside it; auto, the default, puts it beside the figure when the window is wide enough; side=1 is
+  an alias for horizontal), map=3d | vertex | value (3-D graph, the default; or a 2-D map coloured by optimal extreme point or by the value of h_LP).
   Geometry is set in the CONFIG block in the script below.
 -->
 <style>
@@ -128,6 +130,9 @@
   .options button { padding: 3px 10px; border: 1px solid var(--grid); border-radius: 6px; background: var(--bg);
                     color: var(--fg); font: inherit; cursor: pointer; }
   .options button:hover { border-color: var(--axis); }
+  .options select { padding: 2px 6px; border: 1px solid var(--grid); border-radius: 6px; background: var(--bg);
+                    color: var(--fg); font: inherit; cursor: pointer; }
+  .options select:hover { border-color: var(--axis); }
   /* Slider of a constraint that is not relaxed: greyed out */
   .controls.off label[for], .controls.off .uval, .controls.off input[type=range] { opacity: 0.4; }
   .controls input[type=range]:disabled { cursor: not-allowed; }
@@ -148,11 +153,19 @@
   .formula .lhs > span { grid-area: 1 / 1; }
   .formula .lhs .hid { visibility: hidden; }
   .dual { margin-top: 14px; border-top: 1px solid var(--grid); padding-top: 10px; }
-  /* "Side by side": the dual-function panel to the right of the rest (stacked again on narrow screens). */
+  /* Layout "Horizontal": the dual-function panel to the right of the rest; "Auto": the same when the
+     window is wide enough, else stacked as in "Vertical". */
+  .wrap.horizontal { max-width: 1520px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 28px; }
+  /* the dual-function panel beside the figure and controls (the .main column), centred against them */
+  .wrap.horizontal > .dual { align-self: center; margin-top: 0; border-top: 0; padding-top: 0; }
+  /* the choice of LP and the written-out LP across both columns, centred on the page */
+  .wrap.horizontal > .top { grid-column: 1 / -1; }
+  .wrap.horizontal .lpchoice { margin: 2px 76px 4px; text-align: center; }
   @media (min-width: 1000px) {
-    .wrap.side { max-width: 1520px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 28px; }
-    /* the dual-function panel beside everything else (the .main column), centred against it */
-    .wrap.side > .dual { align-self: center; margin-top: 0; border-top: 0; padding-top: 0; }
+    .wrap.auto { max-width: 1520px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 28px; }
+    .wrap.auto > .dual { align-self: center; margin-top: 0; border-top: 0; padding-top: 0; }
+    .wrap.auto > .top { grid-column: 1 / -1; }
+    .wrap.auto .lpchoice { margin: 2px 76px 4px; text-align: center; }
   }
   #dualfig { touch-action: none; cursor: crosshair; }
   #dualfig.rotate { cursor: grab; }
@@ -172,16 +185,22 @@
        href="https://chalmers-mathematical-optimization.github.io/Large-Scale-Optimization-Illustrations/Lagrangean%20Relaxation.html">↗</a>
     <button type="button" class="cbtn" id="themeBtn"></button>
   </div>
-  <div class="main">
+  <div class="top">
   <div class="lpchoice"><label>LP: <select id="lpSelect"></select></label></div>
   <div class="formula" id="formula"></div>
+  </div>
+  <div class="main">
   <svg id="fig" viewBox="0 0 720 600" role="img" aria-label="Polyhedron X_LP cut by two constraints, with the objective vector, the scaled constraint normals and the resulting Lagrangean objective direction."></svg>
   <details class="options">
     <summary>Options</summary>
     <label><input type="checkbox" id="optVectors" checked> Penalty vectors</label>
     <label><input type="checkbox" id="optBoxes"> Penalty boxes</label>
     <label><input type="checkbox" id="optFit"> Fit graph</label>
-    <label><input type="checkbox" id="optSide"> Side by side</label>
+    <label>Layout <select id="optLayout">
+      <option value="auto">Auto</option>
+      <option value="vertical">Vertical</option>
+      <option value="horizontal">Horizontal</option>
+    </select></label>
     <div class="btns">
       <button type="button" id="showLabels">Show all labels</button>
       <button type="button" id="hideLabels">Hide all labels</button>
@@ -1523,9 +1542,9 @@
   });
   sliders.forEach(s => s.addEventListener("input", render));
   [optVectors, optBoxes, optFit].forEach(o => o.addEventListener("change", render));
-  const optSide = document.getElementById("optSide"), page = document.getElementById("page");
-  const applySide = () => page.classList.toggle("side", optSide.checked);
-  optSide.addEventListener("change", applySide);
+  const optLayout = document.getElementById("optLayout"), page = document.getElementById("page");
+  const applyLayout = () => ["auto", "horizontal"].forEach(c => page.classList.toggle(c, optLayout.value === c));
+  optLayout.addEventListener("change", applyLayout);
   // Labels: each label (data-lab) shows while the pointer is over an object with its key in data-hl, or
   // when pinned. Clicking an object (or its label while shown by hovering it) pins its labels, clicking
   // a pinned label unpins it. "Show all labels" /
@@ -1572,8 +1591,9 @@
     }
     applyHover();
   });
-  if (params.get("side") === "1") optSide.checked = true;
-  applySide();
+  const layout = params.get("side") === "1" ? "horizontal" : params.get("layout");
+  if (["auto", "vertical", "horizontal"].includes(layout)) optLayout.value = layout;
+  applyLayout();
   // Dragging x(u) in the figure (only when several points are optimal).
   const figPt = e => {
     const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
