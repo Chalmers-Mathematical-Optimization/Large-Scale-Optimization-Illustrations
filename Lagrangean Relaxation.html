@@ -93,7 +93,7 @@
              paint-order: stroke; stroke: var(--bg); stroke-width: 4px; stroke-linejoin: round; }
   svg .small { font-size: 14px; fill: var(--muted); }
   /* A label shows while the pointer is over its object (its hover target) or when pinned; a shown
-     label can be clicked to unpin it. */
+     label can be clicked to pin it (if shown by hovering) or unpin it (if pinned). */
   #fig text { pointer-events: none; }
   #fig text[data-lab]:not(.show) { visibility: hidden; }
   #fig text[data-lab].show { pointer-events: auto; cursor: pointer; }
@@ -1360,7 +1360,8 @@
   const applySide = () => page.classList.toggle("side", optSide.checked);
   optSide.addEventListener("change", applySide);
   // Labels: each label (data-lab) shows while the pointer is over an object with its key in data-hl, or
-  // when pinned. Clicking an object pins its labels, clicking a shown label unpins it. "Show all labels" /
+  // when pinned. Clicking an object (or its label while shown by hovering it) pins its labels, clicking
+  // a pinned label unpins it. "Show all labels" /
   // "Hide all labels" set the default for every label and forget the pins. The coordinates of x(u)
   // (key "hover-xs") only show on hover or when pinned.
   let hoverKeys = [];
@@ -1390,8 +1391,11 @@
   svg.addEventListener("click", e => {
     if (downAt && Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 4) return;
     const lab = e.target.closest && e.target.closest("text[data-lab]");
-    if (lab) {
-      const k = lab.getAttribute("data-lab");
+    const k = lab && lab.getAttribute("data-lab");
+    if (lab && !shownKey(k)) {
+      // Shown only by hovering its object (the label may cover it): pin as if the object was clicked.
+      hoverKeys.forEach(h => pinned.set(h, true));
+    } else if (lab) {
       pinned.set(k, false);
       hoverKeys = hoverKeys.filter(h => h !== k);          // hide it now, though its object may be under it
     } else {
