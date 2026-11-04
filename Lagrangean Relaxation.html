@@ -694,21 +694,29 @@
   const optFit = document.getElementById("optFit");          // zoom out so arrows and boxes fit
   // When several points are optimal, x(u) can be dragged within that set (an edge, or all of X_LP).
   let tieKey = null, tiePt = null, tieShape = null, tieDrag = false;
+  // Parameter in [0, 1] of the point of segment a-b nearest to q (any dimension), and the nearest point of
+  // a convex polygon to q.
+  const segT = (a, b, q) => {
+    const ab = b.map((v, n) => v - a[n]), aq = q.map((v, n) => v - a[n]);
+    return clamp(ab.reduce((s, v, n) => s + v * aq[n], 0) / (ab.reduce((s, v) => s + v * v, 0) || 1), 0, 1);
+  };
+  const nearestInConvex = (poly, q) => {
+    if (inConvex(poly, q)) return q;
+    let r = q, bestD = Infinity;
+    poly.forEach((A, n) => {
+      const B = poly[(n + 1) % poly.length], f = add(A, scale(segT(A, B, q), [B[0] - A[0], B[1] - A[1]]));
+      const dd = Math.hypot(f[0] - q[0], f[1] - q[1]);
+      if (dd < bestD) { bestD = dd; r = f; }
+    });
+    return r;
+  };
   // Nearest point of the optimal set to q, snapping to x*_LP when within a few pixels of it.
   function onTieSet(q) {
-    let r = q;
+    let r;
     if (tieShape.seg) {
-      const [a, b] = tieShape.seg, ab = [b[0] - a[0], b[1] - a[1]];
-      r = add(a, scale(clamp(dot([q[0] - a[0], q[1] - a[1]], ab) / (dot(ab, ab) || 1), 0, 1), ab));
-    } else if (!inConvex(tieShape.poly, q)) {
-      let bestD = Infinity;
-      tieShape.poly.forEach((A, n) => {
-        const B = tieShape.poly[(n + 1) % tieShape.poly.length], ab = [B[0] - A[0], B[1] - A[1]];
-        const f = add(A, scale(clamp(dot([q[0] - A[0], q[1] - A[1]], ab) / (dot(ab, ab) || 1), 0, 1), ab));
-        const dd = Math.hypot(f[0] - q[0], f[1] - q[1]);
-        if (dd < bestD) { bestD = dd; r = f; }
-      });
-    }
+      const [a, b] = tieShape.seg;
+      r = add(a, scale(segT(a, b, q), [b[0] - a[0], b[1] - a[1]]));
+    } else r = nearestInConvex(tieShape.poly, q);
     const [rx, ry] = px(r), [lx, ly] = px(xLP);
     return Math.hypot(rx - lx, ry - ly) < 8 && tieShape.has(xLP) ? xLP.slice() : r;
   }
@@ -1115,6 +1123,7 @@
   // ---- The subdifferential ∂h_LP(u) in subgradient coordinates g = (A_i^T x - b_i)_{i in R}: a number
   // line (one relaxed constraint) or a plane (both), equally scaled, fitted to g of the whole domain.
   const ssvg = document.getElementById("subfig"), scap = document.getElementById("subcap");
+  let subDrag = null, subDragging = false;           // dragging g(x(u)) within the subdifferential
   function renderSub(R, P, u, h, sub) {
     ssvg.replaceChildren();
     const one = R.length === 1, SW = 720, SH = one ? 84 : 230;
@@ -1175,6 +1184,9 @@
       labelPx(zx - 7, zy + 17, [["0", ""]], { "text-anchor": "end", class: "small" }, ssvg);
     }
     const [cx, cy] = gp(sub.g);
+    // With several subgradients, g(x(u)) can be dragged within ∂h_LP(u); x(u) follows in the figure.
+    subDrag = gs.length >= 2 && tieShape ? { R, gs, k, at: [cx, cy], inv: ([X, Y]) => one ? [(X - ox) / k] : [(X - ox) / k, (oy - Y) / k] } : null;
+    ssvg.style.touchAction = subDrag ? "none" : "";
     el("circle", { cx, cy, r: 8 }, ssvg).style.fill = "var(--halo)";
     el("circle", { cx, cy, r: 5.5 }, ssvg).style.fill = "var(--opt)";
     labelPx(one ? SW / 2 : 40, one ? SH - 4 : Y1 + 4,
@@ -1189,7 +1201,7 @@
       `Subgradients <i>g</i>(<i>x</i>) = (<i>A</i><sub><i>i</i></sub><sup>T</sup><i>x</i> − <i>b</i><sub><i>i</i></sub>)<sub><i>i</i> relaxed</sub>. ` +
       `Light: <i>g</i>(<i>x</i>) for every feasible <i>x</i> of the subproblem (dots: its extreme points). ` +
       `Dark: the subdifferential ∂<i>h</i><sub>LP</sub>(<i>u</i>), <i>g</i> of the optimal <i>x</i>; black: <i>g</i>(<i>x</i>(<i>u</i>))` +
-      (gs.length >= 2 ? ", which moves as <i>x</i>(<i>u</i>) is dragged in the figure." : ".") +
+      (gs.length >= 2 ? ", which moves as <i>x</i>(<i>u</i>) is dragged in the figure; drag it here to move <i>x</i>(<i>u</i>)." : ".") +
       (!isOpt ? "" : R.every(i => u[i] > 1e-12)
         ? " Since 0 ∈ ∂<i>h</i><sub>LP</sub>(<i>u</i>), <i>u</i> is optimal."
         : " <i>u</i> is optimal: some subgradient has <i>g</i><sub><i>i</i></sub> ≤ 0 where <i>u</i><sub><i>i</i></sub> = 0 and <i>g</i><sub><i>i</i></sub> = 0 where <i>u</i><sub><i>i</i></sub> &gt; 0.");
@@ -1652,6 +1664,41 @@
     else svg.style.cursor = nearTiePt(e) ? "move" : "";
   });
   ["pointerup", "pointercancel"].forEach(t => svg.addEventListener(t, () => { tieDrag = false; }));
+  // Dragging g(x(u)) in the subdifferential view: x(u) is the optimal point whose subgradient is nearest
+  // to the pointer. On an edge g is affine along it; on all of X_LP (both relaxed) g(x) = M x - b inverts.
+  const subPt = e => {
+    const pt = ssvg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+    const q = pt.matrixTransform(ssvg.getScreenCTM().inverse());
+    return [q.x, q.y];
+  };
+  const nearSubPt = e => subDrag && Math.hypot(...subPt(e).map((v, n) => v - subDrag.at[n])) < 14;
+  const gOf = (R, x) => R.map(i => dot(CONS[i].a, x) - CONS[i].b);
+  function xForG(R, gs, gt) {
+    if (tieShape.seg) {
+      const [a, b] = tieShape.seg;
+      return add(a, scale(segT(gOf(R, a), gOf(R, b), gt), [b[0] - a[0], b[1] - a[1]]));
+    }
+    const [A, B] = R.map(i => CONS[i].a), det = A[0] * B[1] - A[1] * B[0];
+    if (Math.abs(det) < 1e-12) return tiePt;
+    const g = nearestInConvex(gs, gt), r = [g[0] + CONS[R[0]].b, g[1] + CONS[R[1]].b];
+    return nearestInConvex(tieShape.poly, [(B[1] * r[0] - A[1] * r[1]) / det, (A[0] * r[1] - B[0] * r[0]) / det]);
+  }
+  ssvg.addEventListener("pointerdown", e => {
+    if (!nearSubPt(e)) return;
+    subDragging = true; ssvg.setPointerCapture(e.pointerId); e.preventDefault();
+  });
+  ssvg.addEventListener("pointermove", e => {
+    if (subDragging && subDrag && tieShape) {
+      const { R, gs } = subDrag, gt = subDrag.inv(subPt(e));
+      let x = xForG(R, gs, gt);
+      // Snap to x*_LP when its subgradient is within a few pixels.
+      if (tieShape.has(xLP)) {
+        if (subDrag.k * Math.hypot(...gOf(R, xLP).map((v, n) => v - gt[n])) < 8) x = xLP.slice();
+      }
+      tiePt = x; render();
+    } else ssvg.style.cursor = nearSubPt(e) ? "move" : "";
+  });
+  ["pointerup", "pointercancel"].forEach(t => ssvg.addEventListener(t, () => { subDragging = false; }));
   // A tick sets an exact value (step "any"); the slider snaps to 0.01 again as soon as it is touched.
   sliders.forEach(s => ["pointerdown", "keydown"].forEach(t => s.addEventListener(t, () => { s.step = "0.01"; })));
   formula.addEventListener("change", e => {                         // the relax-checkboxes in the system
