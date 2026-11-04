@@ -69,6 +69,8 @@
     --opt: #ffffff; --halo: #17171b; --star: #a67c00; --star-edge: #ffffff;
   }
   html, body { margin: 0; background: var(--bg); color: var(--fg); }
+  /* Keep room for the scrollbar, so the page doesn't shift sideways when the dual panel shows or hides */
+  html { scrollbar-gutter: stable; }
   /* Sans-serif for text; serif for math (the system, the figures' labels, inline i/sub/sup) */
   :root { --text-font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
           --math-font: "Latin Modern Roman", "CMU Serif", "Cambria", Georgia, serif; }
@@ -90,17 +92,19 @@
   /* Room for the system (values, objective, 2 constraints, x ∈ X_LP), so the page doesn't jump */
   .formula { display: flex; justify-content: safe center; align-items: flex-start; font-size: 1.05rem; margin: 4px 0 8px; line-height: 1.6; min-height: calc(5 * 1.6em); }
   /* Columns: lhs | min / s. t. | left side | relation | right side | relax checkbox. No column gap, so a
-     struck-through constraint is struck continuously; spacing comes from padding and the relation's spaces. */
-  .formula .f { display: grid; grid-template-columns: auto auto auto auto 1fr auto; align-items: baseline; }
+     struck-through constraint is struck continuously; spacing comes from padding and the relation's spaces.
+     The objective spans the checkbox column too, so the checkboxes sit just right of their constraints. */
+  .formula .f { display: grid; grid-template-columns: auto auto auto auto auto 1fr; align-items: baseline; }
   .formula .h, .formula .op { padding-right: 0.6em; }
   .formula .op { text-align: left; }
   .formula .under { display: inline-flex; flex-direction: column; align-items: center; line-height: 1; }
   .formula .under > :last-child { font-size: 0.75em; }
   .formula .l { text-align: right; }
-  .formula .obj { grid-column: span 3; }
+  .formula .obj { grid-column: span 4; }
   .formula .x { padding-left: 0.6em; }
   /* Objective row: the values at x(u) above the terms and factors, one column each so they line up */
-  .formula .stk { display: grid; grid-template-rows: auto auto; grid-auto-flow: column; justify-items: center; align-items: baseline; white-space: nowrap; }
+  .formula .stk { display: grid; grid-template-rows: auto auto; grid-auto-flow: column; row-gap: 0.4em; justify-items: center; align-items: baseline; white-space: nowrap; }
+  .formula .stk.end { justify-items: end; }   /* the value of h_LP(u) and its "=" above the left-hand side's */
   .formula .val { font-size: 0.85em; color: var(--muted); font-variant-numeric: tabular-nums; }
   .formula .val b { color: var(--fg); font-weight: normal; }
   .formula .pl { padding: 0 0.3em; }
@@ -162,9 +166,13 @@
   .uval { min-width: 4.5em; font-variant-numeric: tabular-nums; }
   .n1 { color: var(--n1); } .n2 { color: var(--n2); }
   .formula .inactive { opacity: 0.4; text-decoration: line-through; }
+  /* Both left-hand sides (h_LP(u) / z_LP) in one cell, only one visible, so the system keeps its size */
   .formula .lhs { display: inline-grid; justify-items: end; }
   .formula .lhs > span { grid-area: 1 / 1; }
-  .formula .lhs .hid { visibility: hidden; }
+  .formula .hid { visibility: hidden; }
+  /* A penalty term of a kept constraint is struck through across its columns (and the gaps between them) */
+  .formula .stk .inactive { text-decoration: none; justify-self: stretch; text-align: center;
+                            background: linear-gradient(currentColor, currentColor) no-repeat 0 58% / 100% 1px; }
   .dual { margin-top: 14px; border-top: 1px solid var(--grid); padding-top: 10px; }
   /* Layout "Horizontal": the dual-function panel to the right of the rest; "Auto": the same when the
      window is wide enough, else stacked as in "Vertical". */
@@ -707,11 +715,11 @@
   const slackHtml = (j, ptHtml) => `<i>A</i><sub>${j}</sub><sup>T</sup>${ptHtml} − <i>b</i><sub>${j}</sub>`;
   const slack = j => [["A", "it"], [j, "sub"], ["T", "sup"], ["x", "it"], ["(", ""], ["u", "it"], [")", ""], [" − ", ""], ["b", "it"], [j, "sub"]];
   // Six-column layout:  lhs | min / s. t. | expression (objective: one cell; constraint: left, relation,
-  // right, each with class cls) | relax-checkbox (constraint rows only)
+  // right, each with class cls; the objective also spans the next column) | relax-checkbox (constraint rows only)
   const fRow = (lhs, op, expr, extra = "", cls = "") => `<span class="h">${lhs}</span><span class="op">${op}</span>` +
     (Array.isArray(expr)
       ? expr.map((e, n) => `<span class="${["l", "m", "r"][n]}${cls}">${e}</span>`).join("")
-      : `<span class="obj">${expr}</span>`) + `<span class="x">${extra}</span>`;
+      : `<span class="obj">${expr}</span>`) + (Array.isArray(expr) ? `<span class="x">${extra}</span>` : "");
   let showDual = true;
 
   function render() {
@@ -1016,31 +1024,32 @@
     placeLabels(dyn);
     applyHover();
 
-    // Formula for the current relaxation, written at the shown point x(u) (x*_LP with nothing relaxed):
-    // objective, then kept constraints, then x(u) ∈ X_LP.
-    // Both left-hand sides occupy the same cell (only one visible), so switching doesn't move the system.
-    // Above the objective row, the values: h_LP(u) (z_LP), c^T x(u), and for each relaxed constraint
-    // u_i · (A_i^T x(u) - b_i), in constraint i's colour. The cells of the objective row are [value, expression] pairs.
-    const xsHtml = R.length ? "<i>x</i>(<i>u</i>)" : "<i>x</i>*<sub>LP</sub>";
-    const stk = cells => `<span class="stk">` +
-      cells.map(([v, e]) => `<span class="val">${v}</span><span>${e}</span>`).join("") + "</span>";
-    const lhs = stk([[`<b>${fmt(h)}</b>`, `<span class="lhs"><span${R.length ? "" : ' class="hid"'}><i>h</i><sub>LP</sub>(<i>u</i>) =</span>` +
-                `<span${R.length ? ' class="hid"' : ""}><i>z</i><sub>LP</sub> =</span></span>`]]);
+    // Formula for the current relaxation: objective, then kept constraints, then x ∈ X_LP.
+    // Both left-hand sides occupy the same cell (only one visible), and every penalty term has the same
+    // columns whether relaxed or not, so switching doesn't move the system.
+    // Above the objective row, the values at the shown point x(u): h_LP(u) (z_LP), c^T x(u), and for each relaxed constraint
+    // u_i · (A_i^T x(u) - b_i), in constraint i's colour. The cells of the objective row are
+    // [value, expression, expression's class] triples.
+    const xHtml = "<i>x</i>";
+    const stk = (cells, cl = "") => `<span class="stk${cl}">` +
+      cells.map(([v, e, c = ""]) => `<span class="val">${v}</span><span class="${c}">${e}</span>`).join("") + "</span>";
+    const lhs = stk([[`<b>${fmt(h)}</b> =`, `<span class="lhs"><span${R.length ? "" : ' class="hid"'}><i>h</i><sub>LP</sub>(<i>u</i>) =</span>` +
+                `<span${R.length ? ' class="hid"' : ""}><i>z</i><sub>LP</sub> =</span></span>`]], " end");
     // Both penalty terms and both constraints are always shown, in their constraint's colour; the inactive
     // one of each pair (penalty of a kept constraint, constraint that is relaxed) is dimmed and struck through.
     const inact = on => (on ? "" : " inactive");
-    const obj = [[`<b>${fmt(xc)}</b>`, `<i>c</i><sup>T</sup>${xsHtml}`]];
+    const obj = [[`<b>${fmt(xc)}</b>`, `<i>c</i><sup>T</sup>${xHtml}`]];
     [0, 1].forEach(i => {
-      const n = `n${i + 1}`, pen = `<i>u</i><sub>${i + 1}</sub>(${slackHtml(i + 1, xsHtml)})`;
-      if (!R.includes(i)) { obj.push(["", `<span class="pl ${n} inactive">+ ${pen}</span>`]); return; }
+      // A kept constraint's term: values hidden, expression dimmed and struck through.
+      const n = `n${i + 1}`, on = R.includes(i), hid = on ? "" : " hid", ex = `${n}${inact(on)}`;
       const v = xd[i], vs = fmt(v);
-      obj.push([`<span class="pl">+</span>`, `<span class="pl ${n}">+</span>`],
-               [`<span class="${n}">${fmt(u[i])}</span>`, `<span class="${n}"><i>u</i><sub>${i + 1}</sub></span>`],
-               ["·", ""],
-               [`<span class="${n}">${v < -5e-3 ? `(${vs})` : vs}</span>`, `<span class="${n}">(${slackHtml(i + 1, xsHtml)})</span>`]);
+      obj.push([`<span class="pl${hid}">+</span>`, "+", `pl ${ex}`],
+               [`<span class="${n}${hid}">${fmt(u[i])}</span>`, `<i>u</i><sub>${i + 1}</sub>`, ex],
+               [`<span class="${hid}">·</span>`, "&nbsp;", ex],
+               [`<span class="${n}${hid}">${v < -5e-3 ? `(${vs})` : vs}</span>`, `(${slackHtml(i + 1, xHtml)})`, ex]);
     });
-    const stRows = [...[0, 1].map(i => [consHtml(i, xsHtml), ` n${i + 1}${inact(K.includes(i))}`]),
-                    [[xsHtml, "&nbsp;∈&nbsp;", "<i>X</i><sub>LP</sub>"], ""]];
+    const stRows = [...[0, 1].map(i => [consHtml(i, xHtml), ` n${i + 1}${inact(K.includes(i))}`]),
+                    [[xHtml, "&nbsp;∈&nbsp;", "<i>X</i><sub>LP</sub>"], ""]];
     const relaxBox = i => `<label class="relax"><input type="checkbox" class="relax${i + 1}" data-i="${i}"` +
       `${R.includes(i) ? " checked" : ""}> Relax</label>`;
     formula.innerHTML = `<div class="f">${fRow(lhs, stk([["&nbsp;", `<span class="under"><span>min</span><i>x</i></span>`]]), stk(obj))}` +
