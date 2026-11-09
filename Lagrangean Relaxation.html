@@ -263,6 +263,11 @@
     <button type="button" id="optToggle" class="optbtn" aria-expanded="false" aria-controls="optPanel">Options<span class="caret" aria-hidden="true">▾</span></button></div>
   <div class="options" id="optPanel" hidden>
     <label><input type="checkbox" id="optVectors" checked> Penalty vectors</label>
+    <span class="opt" id="optGDistRow"><label><input type="checkbox" id="optGDist"> Constraint distances</label><span class="help">
+      <button type="button" aria-label="About constraint distances" aria-describedby="gdistHelp">?</button>
+      <span class="pop" id="gdistHelp" role="tooltip">Dotted lines from <i>x</i>(<i>u</i>) to the relaxed constraints, of length
+        |<i>g</i><sub><i>i</i></sub>| / ‖<i>A</i><sub><i>i</i></sub>‖ for the subgradient components <i>g</i><sub><i>i</i></sub> = <i>A</i><sub><i>i</i></sub><sup>T</sup><i>x</i>(<i>u</i>) − <i>b</i><sub><i>i</i></sub>.</span>
+    </span></span>
     <span class="opt"><label><input type="checkbox" id="optFit"> Fit graph</label><span class="help">
       <button type="button" aria-label="About fit graph" aria-describedby="fitHelp">?</button>
       <span class="pop" id="fitHelp" role="tooltip">Scales the graph so all elements are visible.</span>
@@ -364,7 +369,7 @@
   ];
   // Subgradient information: the subdifferential plot, the subgradient shading in the h_LP graph (fan or
   // supporting line/plane at u) and the explanations about subgradients. false hides all of it.
-  const SUBGRADIENTS = false;
+  const SUBGRADIENTS = true;
   // ------------------------------------------------------------------------
 
   const NS = "http://www.w3.org/2000/svg";
@@ -615,6 +620,7 @@
     { id: "xlp", name: "<i>X</i><sub>LP</sub>", keys: ["X_LP"] },
     { id: "objective", name: "Objective", keys: ["c", "res"] },
     { id: "vectors", name: "Penalty vectors", keys: ["n1", "n2"], needs: "optVectors" },   // greyed out while that option is off
+    ...(SUBGRADIENTS ? [{ id: "subgradient", name: "Constraint distances", keys: ["g1", "g2"], needs: "optGDist" }] : []),
     { id: "axes", name: "Axes", keys: ["ax1", "ax2"] },
     { id: "coords", name: "Coordinates of <i>x</i>(<i>u</i>)", keys: ["hover-xs"] },
   ];
@@ -860,6 +866,8 @@
   const rows = [1, 2].map(i => document.getElementById("row" + i));
   const ticks = [1, 2].map(i => document.getElementById("ticks" + i));
   const optVectors = document.getElementById("optVectors");
+  const optGDist = document.getElementById("optGDist");      // perpendiculars from x(u) to the relaxed constraints
+  document.getElementById("optGDistRow").hidden = !SUBGRADIENTS;
   const optFit = document.getElementById("optFit");          // zoom out so the arrows fit
   // "Immediate subproblem solve" off: changing u leaves everything but the penalised objective vector at
   // the u of the last evaluation (uAt, slider values) until "Reevaluate"; null forces evaluating at the
@@ -1095,6 +1103,24 @@
       obDot(k.foot, 4, 30);
     });
 
+    // Subgradient components g_i = A_i^T x(u) - b_i = ||A_i|| · (signed distance from x(u) to line i):
+    // a dotted perpendicular from x(u) to each relaxed constraint's line.
+    const gFoot = i => add(xs, scale(-xd[i] / CONS[i].n, CONS[i].e));
+    const gShown = SUBGRADIENTS && optGDist.checked ? R.filter(i => Math.abs(xd[i]) / CONS[i].n * S > 3) : [];
+    gShown.forEach(i => {
+      const f = gFoot(i), [ax, ay] = px(xs), [fx0, fy0] = px(f), L = Math.hypot(ax - fx0, ay - fy0);
+      const ln = el("line", { x1: ax, y1: ay, x2: fx0, y2: fy0, "stroke-width": 2, "stroke-dasharray": "2 3", "stroke-linecap": "round" }, dyn);
+      ln.style.stroke = `var(${NCOL[i]})`;
+      if (L > 14) {
+        const s = 7, nx = s * (ax - fx0) / L, ny = s * (ay - fy0) / L;
+        const sq = el("polyline", { points: `${fx0 + nx},${fy0 + ny} ${fx0 + nx - ny},${fy0 + ny + nx} ${fx0 - ny},${fy0 + nx}`,
+                                    fill: "none", "stroke-width": 1.2 }, dyn);
+        sq.style.stroke = `var(${NCOL[i]})`;
+      }
+      hitLine([ax, ay], [fx0, fy0], "g" + (i + 1), dyn);
+      obSeg(xs, f, 1.5);
+    });
+
     // c, then u_i A_i for each relaxed i appended head to tail (penalty vectors, optional), then the resultant.
     const O = [0, 0];
     let tip = add(O, C);
@@ -1163,6 +1189,10 @@
       const k = CONS[i], tipN = add(k.foot, scale(uv[i], k.a));
       want([["u", "it"], [String(i + 1), "it-sub"], ...vecParts(i)], { class: "small", "data-lab": "n" + (i + 1) },
            L => [...around(tipN, 5, L, sdir(k.a), 5), ...beside(k.foot, tipN, 4, L).map((c, n) => [...c, 15 + 3 * n])]);
+    });
+    gShown.forEach(i => {
+      want([["g", "it"], [String(i + 1), "sub"], [" = " + fmt(xd[i]), ""]], { class: "small", "data-lab": "g" + (i + 1), style: `fill:var(${NCOL[i]})` },
+           L => beside(xs, gFoot(i), 4, L));
     });
     // Coordinates of x(u): only while hovering the point (queued last, so they never push other labels).
     want([["(", ""], [fmt(xs[0]), ""], [", ", ""], [fmt(xs[1]), ""], [")", ""]], { class: "small", "data-lab": "hover-xs" },
@@ -1326,13 +1356,54 @@
       labelPx(zx - 7, zy + 17, [["0", ""]], { "text-anchor": "end", class: "small" }, ssvg);
     }
     const [cx, cy] = gp(sub.g);
+    // The length of the subgradient: an arrow from 0 to g(x(u)) (above the number line with one relaxed
+    // constraint), and in the plane the circle of that radius. With several subgradients, the shortest one
+    // (the point of ∂h_LP(u) nearest 0) dashed: it can be 0 at an optimum while g(x(u)) stays long.
+    const len = Math.hypot(...sub.g);
+    const nearest = (a, b) => {          // the point of segment [a, b] nearest 0
+      const d = a.map((v, n) => b[n] - v), dd = dot(d, d);
+      const t = dd ? Math.max(0, Math.min(1, -dot(a, d) / dd)) : 0;
+      return a.map((v, n) => v + t * d[n]);
+    };
+    let short = null;
+    if (gs.length >= 2) {
+      const cr = (a, b) => a[0] * b[1] - a[1] * b[0];
+      const inside = !one && gs.length >= 3 &&
+        [1, -1].some(s => gs.every((g, n) => s * cr(g, gs[(n + 1) % gs.length]) >= -1e-12));
+      const cands = one ? [nearest(...[Math.min, Math.max].map(f => [f(...gs.map(g => g[0]))]))]
+                  : inside ? [[0, 0]] : gs.map((g, n) => nearest(g, gs[(n + 1) % gs.length]));
+      short = cands.reduce((m, q) => Math.hypot(...q) < Math.hypot(...m) ? q : m);
+    }
+    const lift = one ? 16 : 0;          // above the number line, clear of the shaded subdifferential
+    if (!one && len * k >= 1) {
+      const c = el("circle", { cx: zx, cy: zy, r: len * k, fill: "none", "stroke-width": 1, "stroke-dasharray": "3 4" }, ssvg);
+      c.style.stroke = "var(--fg)"; c.style.strokeOpacity = 0.35;
+    }
+    if (short && Math.hypot(...short) * k >= 1 && Math.hypot(short[0] - sub.g[0], (short[1] || 0) - (sub.g[1] || 0)) * k > 3) {
+      const [sx, sy] = gp(short);
+      seg([zx, (one ? oy : zy) - lift], [sx, sy - lift], "var(--fg)", 1.5, { "stroke-dasharray": "4 3" });
+      el("circle", { cx: sx, cy: sy - lift, r: 3.5, "stroke-width": 1.5 }, ssvg).style.cssText = "fill:var(--bg);stroke:var(--fg)";
+    }
+    const arrowPx = (a, b, stroke, w, extra = {}) => {
+      const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (L < 1) return;
+      const ux = (b[0] - a[0]) / L, uy = (b[1] - a[1]) / L, hd = Math.min(11, 0.6 * L), hw = 0.42 * hd;
+      const bx = b[0] - ux * hd, by = b[1] - uy * hd;
+      seg(a, [bx, by], "var(--bg)", w + 3, { "stroke-opacity": 0.7 });     // stands out on the shaded ∂h_LP(u)
+      seg(a, [bx, by], stroke, w, { "stroke-linecap": "butt", ...extra });
+      el("polygon", { points: `${b[0]},${b[1]} ${bx - uy * hw},${by + ux * hw} ${bx + uy * hw},${by - ux * hw}` }, ssvg).style.fill = stroke;
+    };
+    arrowPx([zx, (one ? oy : zy) - lift], [cx, cy - lift], "var(--fg)", 2.2);
+    if (one) seg([cx, cy - lift - 5], [cx, cy], "var(--fg)", 1, { "stroke-opacity": 0.5 });
     // With several subgradients, g(x(u)) can be dragged within ∂h_LP(u); x(u) follows in the figure.
     subDrag = gs.length >= 2 && tieShape ? { R, gs, k, at: [cx, cy], inv: ([X, Y]) => one ? [(X - ox) / k] : [(X - ox) / k, (oy - Y) / k] } : null;
     ssvg.style.touchAction = subDrag ? "none" : "";
     el("circle", { cx, cy, r: 8 }, ssvg).style.fill = "var(--halo)";
     el("circle", { cx, cy, r: 5.5 }, ssvg).style.fill = "var(--opt)";
     labelPx(one ? SW / 2 : 40, one ? SH - 4 : Y1 + 4,
-      [["g", "it"], ["(", ""], ["x", "it"], ["(", ""], ["u", "it"], [")) = ", ""], [one ? fmt(sub.g[0]) : `(${fmt(sub.g[0])}, ${fmt(sub.g[1])})`, ""]],
+      [["g", "it"], ["(", ""], ["x", "it"], ["(", ""], ["u", "it"], [")) = ", ""], [one ? fmt(sub.g[0]) : `(${fmt(sub.g[0])}, ${fmt(sub.g[1])})`, ""],
+       ...(one ? [] : [[",   ‖", ""], ["g", "it"], ["‖ = ", ""], [fmt(len), ""]]),
+       ...(short ? [[",   shortest ‖", ""], ["g", "it"], ["‖ = ", ""], [fmt(Math.hypot(...short)), ""]] : [])],
       { "text-anchor": one ? "middle" : "start" }, ssvg);
 
     // u is optimal iff some subgradient g has g_i = 0 where u_i > 0 and g_i <= 0 where u_i = 0.
@@ -1342,7 +1413,8 @@
     const DRAG = ", which moves as <i>x</i>(<i>u</i>) is dragged in the figure; drag it here to move <i>x</i>(<i>u</i>).";
     const OPT0 = " <i>u</i> is optimal: some subgradient has <i>g</i><sub><i>i</i></sub> ≤ 0 where <i>u</i><sub><i>i</i></sub> = 0 and <i>g</i><sub><i>i</i></sub> = 0 where <i>u</i><sub><i>i</i></sub> &gt; 0.";
     const cap = (drag, opt) =>
-      `Subgradient for current <i>x</i> shown with a dot. Full subdifferential for current <i>u</i> in shaded region if it contains more than subgradient. `;
+      `Subgradient for current <i>x</i> shown with a dot. Full subdifferential for current <i>u</i> in shaded region if it contains more than subgradient. ` +
+      `The arrow from 0 is its length ‖<i>g</i>‖; with several subgradients, the dashed line goes to the shortest one. `;
     const opt = !isOpt ? "" : R.every(i => u[i] > 1e-12) ? " Since 0 ∈ ∂<i>h</i><sub>LP</sub>(<i>u</i>), <i>u</i> is optimal." : OPT0;
     scap.innerHTML = `<span class="hid" aria-hidden="true">${cap(true, OPT0)}</span><span>${cap(gs.length >= 2, opt)}</span>`;
   }
@@ -1797,7 +1869,7 @@
   sliders.forEach(s => s.addEventListener("input", uChanged));
   reevalBtn.addEventListener("click", () => { uAt = null; render(); });
   optImmediate.addEventListener("change", () => { uAt = null; render(); });
-  [optVectors, optFit].forEach(o => o.addEventListener("change", render));
+  [optVectors, optGDist, optFit].forEach(o => o.addEventListener("change", render));
   const optLayout = document.getElementById("optLayout"), page = document.getElementById("page");
   const applyLayout = () => ["auto", "horizontal"].forEach(c => page.classList.toggle(c, optLayout.value === c));
   optLayout.addEventListener("change", applyLayout);
@@ -1848,7 +1920,7 @@
     g.label.classList.toggle("off", off);
     g.label.querySelector("input").disabled = off;
   });
-  optVectors.addEventListener("change", syncLabelGroups);
+  [optVectors, optGDist].forEach(o => o.addEventListener("change", syncLabelGroups));
   syncLabelGroups();
   svg.addEventListener("pointerover", e => {
     if (tieDrag) return;                                   // keep x(u)'s label while it is dragged
