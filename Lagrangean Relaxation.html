@@ -116,6 +116,13 @@
   .lppts .pt { white-space: nowrap; }
   .lppts[hidden], .lpform [hidden] { display: none; }
   .lpxmode { margin-top: 8px; color: var(--muted); }
+  /* X_LP by constraints: one per row, beside "X_LP = {x :", the last one closing the brace */
+  .lpxcons { display: grid; grid-template-columns: auto 1fr; align-items: baseline; gap: 6px 10px; margin-top: 8px; font-family: var(--math-font); }
+  .lpxcons[hidden] { display: none; }
+  .lpxcons > .op { grid-column: 1; grid-row: 1; }
+  .lpxcons > .pt, .lpxcons > .add { grid-column: 2; justify-self: start; white-space: nowrap; }
+  .lpxcons .close { visibility: hidden; }
+  .lpxcons .pt.last .close { visibility: visible; }
   .lpeditor button.del, .lpeditor button.add { margin-left: 2px; padding: 0 5px; line-height: 1.2; font-size: 0.85rem; color: var(--muted); }
   .lpeditor button.del:hover:not(:disabled), .lpeditor button.add:hover { color: var(--fg); }
   .lpeditor button:disabled { opacity: 0.35; cursor: not-allowed; }
@@ -302,8 +309,8 @@
       <option value="pts">extreme points</option><option value="cons">constraints</option></select></div>
     <div class="lppts" id="lpPts"><span class="op"><i>X</i><sub>LP</sub> = conv</span>
       <button type="button" id="lpAddPt" class="add" title="Add a point" aria-label="Add a point">+</button></div>
-    <div class="lppts" id="lpXCons" hidden><span class="op"><i>X</i><sub>LP</sub> = {<i>x</i> :</span>
-      <button type="button" id="lpAddXc" class="add" title="Add a constraint" aria-label="Add a constraint of X_LP">+</button><span class="op">}</span></div>
+    <div class="lpxcons" id="lpXCons" hidden><span class="op"><i>X</i><sub>LP</sub> = {<i>x</i> :</span>
+      <button type="button" id="lpAddXc" class="add" title="Add a constraint" aria-label="Add a constraint of X_LP">+</button></div>
     <div class="lpnote" id="lpNote" role="status" hidden></div>
     <div class="lpbtns"><button type="button" id="lpApply">Apply</button><button type="button" id="lpClose">Close</button>
       <span class="lperror" id="lpError" role="alert"></span></div>
@@ -2132,12 +2139,15 @@
   const blankCons = () => ({ a: ["", ""], rel: "<=", b: "" });
   const syncDelXc = () => {
     const rows = lpXCons.querySelectorAll(".pt");
-    rows.forEach(r => { r.querySelector("button").disabled = rows.length <= 3; });
+    rows.forEach((r, n) => {
+      r.querySelector("button").disabled = rows.length <= 3;
+      r.classList.toggle("last", n === rows.length - 1);
+    });
   };
   function addXCons(k = blankCons()) {
     const n = lpXCons.querySelectorAll(".pt").length + 1, row = document.createElement("span");
     row.className = "pt";
-    row.innerHTML = consIn(k, `X_LP constraint ${n}`) +
+    row.innerHTML = consIn(k, `X_LP constraint ${n}`) + ` <span class="close op" aria-hidden="true">}</span>` +
       `<button type="button" class="del" title="Remove this constraint" aria-label="Remove constraint">×</button>`;
     row.querySelector("button").addEventListener("click", () => { row.remove(); syncDelXc(); });
     lpXCons.insertBefore(row, document.getElementById("lpAddXc"));
