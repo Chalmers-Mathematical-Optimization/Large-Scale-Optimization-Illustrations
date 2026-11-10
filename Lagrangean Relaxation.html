@@ -24,7 +24,8 @@
 
   Embed with e.g.  <iframe src="lagrangean-relaxation.html?u1=0.8&u2=0.5" width="760" height="1100"></iframe>
   Optional URL parameters: lp=1 | 2 | custom (which LP, as in the buttons at the top; default 1),
-  lpdef=<custom LP> (as made with "Edit LP": c1,c2|a1,a2,le|ge,b|a1,a2,le|ge,b|p1,p2|p1,p2|..., see specParam), u1, u2 (initial prices; u sets both), relax=12 | 1 | 2 | none
+  lpdef=<custom LP> (as made with "Edit LP": [max,]c1,c2|a1,a2,le|ge,b[|a1,a2,le|ge,b]|p1,p2|p1,p2|..., or
+  with X_LP given by constraints ...|x|a1,a2,le|ge,b|a1,a2,le|ge,b|..., see specParam), u1, u2 (initial prices; u sets both), relax=12 | 1 | 2 | none
   (default: none, or the constraints whose price is given),
   dual=0 (hide the dual-function panel), labels=1 (start with all of the figure's labels shown,
   except the coordinates of x(u); or a comma-separated list of label groups: points, constraints, xlp,
@@ -113,12 +114,17 @@
   .lpeditor select { padding: 1px 2px; border: 1px solid var(--axis); border-radius: 4px; background: var(--bg); color: var(--fg); font: inherit; }
   .lppts { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; margin-top: 8px; }
   .lppts .pt { white-space: nowrap; }
+  .lppts[hidden], .lpform [hidden] { display: none; }
+  .lpxmode { margin-top: 8px; color: var(--muted); }
   .lpeditor button.del, .lpeditor button.add { margin-left: 2px; padding: 0 5px; line-height: 1.2; font-size: 0.85rem; color: var(--muted); }
   .lpeditor button.del:hover:not(:disabled), .lpeditor button.add:hover { color: var(--fg); }
   .lpeditor button:disabled { opacity: 0.35; cursor: not-allowed; }
   .lpeditor .lpbtns { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
   .lpeditor .lpbtns button { margin-left: 0; }
   .lpeditor .lperror { color: var(--neg); }
+  /* Note that a max objective or a >= constraint is converted to the form min c^T x, A x <= b */
+  .lpeditor .lpnote { margin-top: 8px; padding: 4px 8px; border-left: 3px solid var(--n1); font-size: 0.85rem; color: var(--muted); }
+  .lpeditor .lpnote[hidden] { display: none; }
   /* Room for the system (values, objective, 2 constraints, x ∈ X_LP), so the page doesn't jump */
   .formula { display: flex; justify-content: safe center; align-items: flex-start; font-size: 1.05rem; margin: 4px 0 8px; line-height: 1.6; min-height: calc(5 * 1.6em); }
   /* Columns: lhs | min / s. t. | x1 term | sign | x2 term | relation | right side | relax checkbox (the x1 and
@@ -163,6 +169,7 @@
   .tick.n1 { color: var(--n1); } .tick.n2 { color: var(--n2); }
   .tick .star { color: var(--fg); font-size: 13px; }
   .controls.off .ticks { display: none; }
+  .controls[hidden] { display: none; }
   .dual[hidden] { display: none; }
   /* Options: under the buttons at the top, opened and closed by the "Options" button */
   .options { margin: 4px 0 8px; padding: 2px 10px 8px; border: 1px solid var(--grid); border-radius: 6px; font-size: 0.95rem; }
@@ -291,8 +298,13 @@
   </div>
   <div class="lpeditor" id="lpEditor" hidden>
     <div class="lpform" id="lpForm"></div>
+    <div class="lpxmode"><i>X</i><sub>LP</sub> given by <select id="lpXMode" aria-label="X_LP given by">
+      <option value="pts">extreme points</option><option value="cons">constraints</option></select></div>
     <div class="lppts" id="lpPts"><span class="op"><i>X</i><sub>LP</sub> = conv</span>
       <button type="button" id="lpAddPt" class="add" title="Add a point" aria-label="Add a point">+</button></div>
+    <div class="lppts" id="lpXCons" hidden><span class="op"><i>X</i><sub>LP</sub> = {<i>x</i> :</span>
+      <button type="button" id="lpAddXc" class="add" title="Add a constraint" aria-label="Add a constraint of X_LP">+</button><span class="op">}</span></div>
+    <div class="lpnote" id="lpNote" role="status" hidden></div>
     <div class="lpbtns"><button type="button" id="lpApply">Apply</button><button type="button" id="lpClose">Close</button>
       <span class="lperror" id="lpError" role="alert"></span></div>
   </div>
@@ -933,8 +945,9 @@
   let showDual = true;
 
   function render() {
-    const R = [0, 1].filter(i => boxes[i].checked);            // relaxed
-    const K = [0, 1].filter(i => !boxes[i].checked);           // kept as hard constraints
+    const I = CONS.map((_, i) => i);                           // the LP's constraints (a custom LP may have one)
+    const R = I.filter(i => boxes[i].checked);                 // relaxed
+    const K = I.filter(i => !boxes[i].checked);                // kept as hard constraints
     // Slider ranges for this choice of relaxed constraints.
     const domain = K.reduce((P, i) => clip(P, CONS[i].a, CONS[i].b), XLP);
     const P = pieces(domain);
@@ -976,6 +989,7 @@
       const on = R.includes(i);
       sliders[i].disabled = !on;
       rows[i].classList.toggle("off", !on);
+      rows[i].hidden = i >= CONS.length;
       uvals[i].textContent = "= " + (+sliders[i].value).toFixed(2);
     });
     syncReeval();
@@ -1211,11 +1225,11 @@
       cells.map(([v, e, c = ""]) => `<span class="val">${v}</span><span class="${c}">${e}</span>`).join("") + "</span>";
     const lhs = stk([[`<b>${fmt(h)}</b> =`, `<span class="lhs"><span${R.length ? "" : ' class="hid"'}><i>h</i><sub>LP</sub>(<i>u</i>) =</span>` +
                 `<span${R.length ? ' class="hid"' : ""}><i>z</i><sub>LP</sub> =</span></span>`]], " end");
-    // Both penalty terms and both constraints are always shown, in their constraint's colour; the inactive
+    // Every penalty term and constraint is always shown, in their constraint's colour; the inactive
     // one of each pair (penalty of a kept constraint, constraint that is relaxed) is dimmed and struck through.
     const inact = on => (on ? "" : " inactive");
     const obj = [[`<b class="cobj">${fmt(xc)}</b>`, partsHtml(termParts(C)), "cobj"]];
-    [0, 1].forEach(i => {
+    I.forEach(i => {
       // A kept constraint's term: values hidden, expression dimmed and struck through.
       const n = `n${i + 1}`, on = R.includes(i), hid = on ? "" : " hid", ex = `${n}${inact(on)}`;
       const v = xd[i], vs = fmt(v);
@@ -1224,12 +1238,12 @@
                [`<span class="${hid}">·</span>`, "&nbsp;", ex],
                [`<span class="${n}${hid}">${v < -5e-3 ? `(${vs})` : vs}</span>`, `(${slackHtml(i + 1)})`, ex]);
     });
-    const stRows = [...[0, 1].map(i => [consHtml(i), ` n${i + 1}${inact(K.includes(i))}`]),
+    const stRows = [...I.map(i => [consHtml(i), ` n${i + 1}${inact(K.includes(i))}`]),
                     [["", "", xHtml, "&nbsp;∈&nbsp;", "<i>X</i><sub>LP</sub>"], ""]];
     const relaxBox = i => `<label class="relax"><input type="checkbox" class="relax${i + 1}" data-i="${i}"` +
       `${R.includes(i) ? " checked" : ""}> Relax</label>`;
     formula.innerHTML = `<div class="f">${fRow(lhs, stk([["&nbsp;", `<span class="under"><span>min</span><i>x</i></span>`]]), stk(obj))}` +
-      stRows.map(([r, cls], n) => fRow("", n === 0 ? "s. t." : "", r, n < 2 ? relaxBox(n) : "", cls)).join("") + "</div>";
+      stRows.map(([r, cls], n) => fRow("", n === 0 ? "s. t." : "", r, n < I.length ? relaxBox(n) : "", cls)).join("") + "</div>";
 
     curOpt = opt;
     renderDual(R, P, u, best, h, sub);
@@ -1788,23 +1802,37 @@
 
   // ---------------------------------------------------------------- custom LP
   // Made in the "Edit LP" form (or given by ?lpdef=) as a spec:
-  //   { c: [c1, c2], cons: [{ a: [a1, a2], rel: "<=" | ">=", b }, (constraint 2)], pts: [[p1, p2], ...] }
-  // where X_LP is the convex hull of pts. In the URL: lpdef=c1,c2|a1,a2,le|ge,b|a1,a2,le|ge,b|p1,p2|p1,p2|...
+  //   { sense: "min" | "max", c: [c1, c2], cons: [{ a: [a1, a2], rel: "<=" | ">=", b }, (constraint 2, optional)],
+  //     pts: [[p1, p2], ...] }  or, with X_LP given by constraints, xcons: [{ a, rel, b }, ...] in place of pts
+  // where X_LP is the convex hull of pts (sense may be left out: min). In the URL:
+  //   lpdef=[max,]c1,c2|a1,a2,le|ge,b[|a1,a2,le|ge,b]|p1,p2|p1,p2|...   or   ...|x|a1,a2,le|ge,b|...
   const fmtNum = v => String(+v.toFixed(4));
   // Spec of an LP, for filling in the form: the custom LP's own, else from the LP's data (constraints as <=).
-  const specOf = lp => lp.spec ?? { c: lp.C.slice(), cons: lp.CONS.map(k => ({ a: k.a.slice(), rel: "<=", b: k.b })),
+  const specOf = lp => lp.spec ?? { sense: "min", c: lp.C.slice(), cons: lp.CONS.map(k => ({ a: k.a.slice(), rel: "<=", b: k.b })),
                                     pts: lp.XLP.map(v => v.slice()) };
   const urlNum = v => String(+v.toPrecision(10));
-  const specParam = sp => [sp.c.map(urlNum).join(","),
-    ...sp.cons.map(k => [...k.a.map(urlNum), k.rel === ">=" ? "ge" : "le", urlNum(k.b)].join(",")),
-    ...sp.pts.map(p => p.map(urlNum).join(","))].join("|");
+  const consParam = k => [...k.a.map(urlNum), k.rel === ">=" ? "ge" : "le", urlNum(k.b)].join(",");
+  const specParam = sp => [(sp.sense === "max" ? "max," : "") + sp.c.map(urlNum).join(","), ...sp.cons.map(consParam),
+    ...(sp.xcons ? ["x", ...sp.xcons.map(consParam)] : sp.pts.map(p => p.map(urlNum).join(",")))].join("|");
   function paramSpec(s) {
+    const bad = () => { throw new Error("The custom LP in the link is malformed."); };
     const g = s.split("|").map(t => t.split(","));
-    const num = t => { const v = parseFloat(t); if (!Number.isFinite(v)) throw new Error("The custom LP in the link is malformed."); return v; };
-    if (g.length < 3 || g[0].length !== 2 || g[1].length !== 4 || g[2].length !== 4 || g.slice(3).some(p => p.length !== 2))
-      throw new Error("The custom LP in the link is malformed.");
-    return { c: g[0].map(num), cons: [g[1], g[2]].map(k => ({ a: [num(k[0]), num(k[1])], rel: k[2] === "ge" ? ">=" : "<=", b: num(k[3]) })),
-             pts: g.slice(3).map(p => p.map(num)) };
+    const num = t => { const v = parseFloat(t); if (!Number.isFinite(v)) bad(); return v; };
+    const cons = k => ({ a: [num(k[0]), num(k[1])], rel: k[2] === "ge" ? ">=" : "<=", b: num(k[3]) });
+    const sense = g[0]?.length === 3 && (g[0][0] === "max" || g[0][0] === "min") ? g[0].shift() : "min";
+    let n = 1;
+    while (n < g.length && n < 3 && g[n].length === 4) n++;      // the (one or two) relaxable constraints
+    const rest = g.slice(n);
+    if (g[0].length !== 2 || n < 2) bad();
+    const sp = { sense, c: g[0].map(num), cons: g.slice(1, n).map(cons) };
+    if (rest[0]?.length === 1 && rest[0][0] === "x") {
+      if (rest.slice(1).some(k => k.length !== 4)) bad();
+      sp.xcons = rest.slice(1).map(cons);
+    } else {
+      if (rest.some(p => p.length !== 2)) bad();
+      sp.pts = rest.map(p => p.map(num));
+    }
+    return sp;
   }
   // Convex hull (counter-clockwise), and a polygon without repeated or collinear vertices.
   function hull(P) {
@@ -1826,6 +1854,25 @@
       return Math.abs((p[0] - a[0]) * (b[1] - a[1]) - (p[1] - a[1]) * (b[0] - a[0])) > tol * tol;
     });
   };
+  // X_LP from constraints: a far-off square cut by each; touching the square means X_LP is unbounded.
+  const BIG = 1e7;
+  function polyOf(xcons) {
+    let P = [[-BIG, -BIG], [BIG, -BIG], [BIG, BIG], [-BIG, BIG]];
+    for (const k of xcons) P = k.rel === ">=" ? clip(P, k.a.map(v => -v), -k.b) : clip(P, k.a, k.b);
+    return P;
+  }
+  // Facets of a polygon (counter-clockwise) as constraints a^T x <= b, scaled to whole numbers when they are.
+  function facetsOf(P) {
+    const gcd = (x, y) => (y ? gcd(y, x % y) : Math.abs(x));
+    return P.map((p, n) => {
+      const q = P[(n + 1) % P.length];
+      let a = [q[1] - p[1], p[0] - q[0]], b = dot(a, p);
+      const ints = [...a, b].every(v => Math.abs(v - Math.round(v)) < 1e-9);
+      const d = ints ? [...a, b].map(Math.round).reduce(gcd) : 0;
+      if (d > 1) { a = a.map(v => v / d); b /= d; }
+      return { a: a.map(v => +v.toFixed(10)), rel: "<=", b: +b.toFixed(10) };
+    });
+  }
   const area = P => Math.abs(P.reduce((s2, p, n) => s2 + p[0] * P[(n + 1) % P.length][1] - p[1] * P[(n + 1) % P.length][0], 0)) / 2;
 
   // Spec -> LP object (as in LPS), or an Error with a message for the reader.
@@ -1834,13 +1881,23 @@
       if (Math.hypot(...k.a) < 1e-12) throw new Error(`Constraint ${i + 1} has no x1 or x2 term.`);
       return k.rel === ">=" ? { a: k.a.map(v => -v), b: -k.b } : { a: k.a.slice(), b: k.b };   // as A_i^T x <= b_i
     });
-    if (sp.pts.length < 3) throw new Error("X_LP needs at least three points.");
-    const XLPn = cleanPoly(hull(sp.pts));
+    let XLPn;
+    if (sp.xcons) {
+      sp.xcons.forEach((k, i) => { if (Math.hypot(...k.a) < 1e-12) throw new Error(`Constraint ${i + 1} of X_LP has no x1 or x2 term.`); });
+      XLPn = cleanPoly(polyOf(sp.xcons));
+      if (!XLPn.length) throw new Error("X_LP is empty: no point satisfies all of its constraints.");
+      if (XLPn.some(p => Math.max(...p.map(Math.abs)) > BIG / 10))
+        throw new Error("X_LP is unbounded: add constraints that close it off.");
+    } else {
+      if (sp.pts.length < 3) throw new Error("X_LP needs at least three points.");
+      XLPn = cleanPoly(hull(sp.pts));
+    }
     if (XLPn.length < 3 || area(XLPn) < 1e-9 * Math.max(...XLPn.flat().map(Math.abs), 1) ** 2)
       throw new Error("X_LP has no interior: the points lie on a line.");
     if (!cons.reduce((P, k) => cleanPoly(clip(P, k.a, k.b)), XLPn).length)
-      throw new Error("No point of X_LP satisfies both constraints, so the LP has no solution.");
-    return { name: "Custom", spec: sp, XLP: XLPn, C: sp.c.slice(), CONS: cons };
+      throw new Error(`No point of X_LP satisfies ${cons.length > 1 ? "both constraints" : "the constraint"}, so the LP has no solution.`);
+    const C = sp.sense === "max" ? sp.c.map(v => -v) : sp.c.slice();                // max c^T x as min -c^T x
+    return { name: "Custom", spec: sp, XLP: XLPn, C, CONS: cons };
   }
 
   // URL parameters: u (both prices), u1, u2, relax=12|1|2|none, dual=0, lp=1|2|custom, lpdef=<custom LP>.
@@ -2044,10 +2101,13 @@
     render();
   }
 
-  // The form: min c1 x1 + c2 x2, the two constraints (a1 x1 + a2 x2, <= or >=, b), and the points whose
-  // convex hull is X_LP (× removes one, at least three are kept; + adds one).
+  // The form: min or max c1 x1 + c2 x2, one or two constraints (a1 x1 + a2 x2, <= or >=, b; × removes the
+  // second, + puts it back), and X_LP: the points whose convex hull it is, or constraints that define it
+  // (× removes one, at least three are kept; + adds one). Switching between the two converts what is there.
   const lpEditor = document.getElementById("lpEditor"), lpForm = document.getElementById("lpForm");
   const lpPts = document.getElementById("lpPts"), lpError = document.getElementById("lpError");
+  const lpXCons = document.getElementById("lpXCons"), lpXMode = document.getElementById("lpXMode");
+  const lpNote = document.getElementById("lpNote");
   const xv = j => `<i>x</i><sub>${j}</sub>`;
   const numIn = (v, label) => `<input type="text" inputmode="decimal" value="${v === "" ? "" : fmtNum(v)}" aria-label="${label}">`;
   const syncDel = () => {
@@ -2064,19 +2124,77 @@
     syncDel();
     return row;
   }
+  // a1 x1 + a2 x2 (<= or >=) b, as in the constraint rows.
+  const relSel = (rel, label) => `<select aria-label="${label}, relation"><option value="<="${rel === ">=" ? "" : " selected"}>≤</option>` +
+    `<option value=">="${rel === ">=" ? " selected" : ""}>≥</option></select>`;
+  const consIn = (k, label) => `${numIn(k.a[0], `${label}, coefficient of x1`)} ${xv(1)} + ${numIn(k.a[1], `${label}, coefficient of x2`)} ${xv(2)} ` +
+    `${relSel(k.rel, label)} ${numIn(k.b, `${label}, right-hand side`)}`;
+  const blankCons = () => ({ a: ["", ""], rel: "<=", b: "" });
+  const syncDelXc = () => {
+    const rows = lpXCons.querySelectorAll(".pt");
+    rows.forEach(r => { r.querySelector("button").disabled = rows.length <= 3; });
+  };
+  function addXCons(k = blankCons()) {
+    const n = lpXCons.querySelectorAll(".pt").length + 1, row = document.createElement("span");
+    row.className = "pt";
+    row.innerHTML = consIn(k, `X_LP constraint ${n}`) +
+      `<button type="button" class="del" title="Remove this constraint" aria-label="Remove constraint">×</button>`;
+    row.querySelector("button").addEventListener("click", () => { row.remove(); syncDelXc(); });
+    lpXCons.insertBefore(row, document.getElementById("lpAddXc"));
+    syncDelXc();
+    return row;
+  }
+  // Shows X_LP as points (mode "pts") or constraints ("cons"), filled from sp (or as converted from the other).
+  function setXMode(mode, sp) {
+    lpXMode.value = mode;
+    lpPts.hidden = mode !== "pts";
+    lpXCons.hidden = mode === "pts";
+    if (!sp) return;
+    lpPts.querySelectorAll(".pt").forEach(r => r.remove());
+    lpXCons.querySelectorAll(".pt").forEach(r => r.remove());
+    if (mode === "pts") (sp.pts ?? [["", ""], ["", ""], ["", ""]]).forEach(p => addPoint(p));
+    else (sp.xcons ?? [blankCons(), blankCons(), blankCons()]).forEach(k => addXCons(k));
+  }
+  // Constraint 2 shown (with ×) or left out (a + in its place).
+  function showCons2(on) {
+    lpForm.querySelectorAll(".k2").forEach(e => { e.hidden = !on; });
+    lpForm.querySelectorAll(".addk2").forEach(e => { e.hidden = on; });
+    syncNote();
+  }
   function openEditor(sp, err) {
     const coef = (v, j, label) => `${numIn(v, `${label}, coefficient of x${j}`)} ${xv(j)}`;
+    const cons = [sp.cons[0], sp.cons[1] ?? blankCons()];
     lpForm.innerHTML =
-      `<span class="op">min</span><span class="row">${coef(sp.c[0], 1, "objective")} + ${coef(sp.c[1], 2, "objective")}</span>` +
-      sp.cons.map((k, i) => `<span class="op">${i ? "" : "s. t."}</span><span class="row n${i + 1}" data-i="${i}">` +
-        `${coef(k.a[0], 1, `constraint ${i + 1}`)} + ${coef(k.a[1], 2, `constraint ${i + 1}`)} ` +
-        `<select aria-label="constraint ${i + 1}, relation"><option value="<="${k.rel === ">=" ? "" : " selected"}>≤</option>` +
-        `<option value=">="${k.rel === ">=" ? " selected" : ""}>≥</option></select> ${numIn(k.b, `constraint ${i + 1}, right-hand side`)}</span>`).join("");
-    lpPts.querySelectorAll(".pt").forEach(r => r.remove());
-    sp.pts.forEach(p => addPoint(p));
+      `<span class="op"><select class="sense" aria-label="minimise or maximise"><option value="min">min</option>` +
+        `<option value="max"${sp.sense === "max" ? " selected" : ""}>max</option></select></span><span class="row">${coef(sp.c[0], 1, "objective")} + ${coef(sp.c[1], 2, "objective")}</span>` +
+      cons.map((k, i) => `<span class="op${i ? " k2" : ""}">${i ? "" : "s. t."}</span><span class="row n${i + 1}${i ? " k2" : ""}" data-i="${i}">` +
+        consIn(k, `constraint ${i + 1}`) +
+        (i ? `<button type="button" class="del" id="lpDelK2" title="Leave out constraint 2" aria-label="Remove constraint 2">×</button>` : "") +
+        "</span>").join("") +
+      `<span class="op addk2"></span><span class="addk2"><button type="button" class="add" id="lpAddK2" ` +
+        `title="Add a second relaxable constraint">+ constraint 2</button></span>`;
+    document.getElementById("lpDelK2").addEventListener("click", () => { showCons2(false); document.getElementById("lpAddK2").focus(); });
+    document.getElementById("lpAddK2").addEventListener("click", () => { showCons2(true); lpForm.querySelector(".row.k2 input").focus(); });
+    setXMode(sp.xcons ? "cons" : "pts", sp);
     lpError.textContent = err || "";
+    showCons2(sp.cons.length > 1);
     showEditor(true);
   }
+  // Under the form, while it has a max objective or a >= constraint: how the LP is converted to the
+  // form the page works with (min c^T x, A_i^T x <= b_i).
+  function syncNote() {
+    const max = lpForm.querySelector("select.sense").value === "max";
+    const ge = [...lpForm.querySelectorAll(".row:not([hidden]) select")].map((s, i) => s.value === ">=" ? i + 1 : 0).filter(Boolean);
+    const parts = [];
+    if (max) parts.push("the maximisation is solved as minimisation of the negated objective, \u2212<i>c</i><sup>T</sup><i>x</i> " +
+                        "(so the vector <i>c</i> drawn is the negated one, and objective values change sign)");
+    if (ge.length) parts.push(`${ge.length > 1 ? "the ≥ constraints are" : `the ≥ constraint ${ge[0]} is`} multiplied by \u22121 ` +
+                              "to read ≤ (so its normal and its price act in the opposite direction)");
+    lpNote.hidden = !parts.length;
+    lpNote.innerHTML = parts.length ? "⚠ This LP will be converted to the form min <i>c</i><sup>T</sup><i>x</i>, " +
+      "<i>A</i><i>x</i> ≤ <i>b</i>: " + parts.join("; ") + "." : "";
+  }
+  lpForm.addEventListener("change", e => { if (e.target.matches("select")) syncNote(); });
   // The form's values as a spec; an unreadable field is marked and throws.
   function readForm() {
     const num = inp => {
@@ -2086,11 +2204,14 @@
       if (!Number.isFinite(v)) { inp.focus(); throw new Error(t ? `Not a number: “${t}”.` : "A field is empty."); }
       return v;
     };
-    const rows = [...lpForm.querySelectorAll(".row")], ins = r => [...r.querySelectorAll("input")];
+    const rows = [...lpForm.querySelectorAll(".row")].filter(r => !r.hidden), ins = r => [...r.querySelectorAll("input")];
+    const consOf = r => { const [a1, a2, b] = ins(r).map(num); return { a: [a1, a2], rel: r.querySelector("select").value, b }; };
     const c = ins(rows[0]).map(num);
-    const cons = rows.slice(1).map(r => { const [a1, a2, b] = ins(r).map(num); return { a: [a1, a2], rel: r.querySelector("select").value, b }; });
-    const pts = [...lpPts.querySelectorAll(".pt")].map(r => ins(r).map(num));
-    return { c, cons, pts };
+    const cons = rows.slice(1).map(consOf);
+    const sp = { sense: lpForm.querySelector("select.sense").value, c, cons };
+    if (lpXMode.value === "cons") sp.xcons = [...lpXCons.querySelectorAll(".pt")].map(consOf);
+    else sp.pts = [...lpPts.querySelectorAll(".pt")].map(r => ins(r).map(num));
+    return sp;
   }
   function showEditor(on) {
     lpEditor.hidden = !on;
@@ -2109,6 +2230,26 @@
     optToggle.setAttribute("aria-expanded", String(!optPanel.hidden));
   });
   document.getElementById("lpAddPt").addEventListener("click", () => addPoint().querySelector("input").focus());
+  document.getElementById("lpAddXc").addEventListener("click", () => addXCons().querySelector("input").focus());
+  // Switching how X_LP is given: the same X_LP in the other form when what is there makes one, else blank rows.
+  lpXMode.addEventListener("change", () => {
+    const mode = lpXMode.value, vals = r => [...r.querySelectorAll("input")].map(i => (i.value.trim() ? Number(i.value.trim().replace(/[−–]/g, "-")) : NaN));
+    const ok = v => v.every(x => Number.isFinite(x)) && v.length > 0;
+    let sp = {};
+    if (mode === "cons") {
+      const pts = [...lpPts.querySelectorAll(".pt")].map(vals);
+      const P = pts.length >= 3 && pts.every(ok) ? cleanPoly(hull(pts)) : [];
+      if (P.length >= 3) sp.xcons = facetsOf(P);
+    } else {
+      const ks = [...lpXCons.querySelectorAll(".pt")].map(r => {
+        const v = vals(r); return { a: v.slice(0, 2), rel: r.querySelector("select").value, b: v[2], v };
+      });
+      const P = ks.length >= 3 && ks.every(k => ok(k.v)) ? cleanPoly(polyOf(ks)) : [];
+      if (P.length >= 3 && P.every(p => Math.max(...p.map(Math.abs)) <= BIG / 10)) sp.pts = P.map(p => p.map(v => +v.toFixed(10)));
+    }
+    lpEditor.querySelectorAll(".bad").forEach(i => i.classList.remove("bad"));
+    setXMode(mode, sp);
+  });
   const applyLP = () => {
     let lp;
     lpEditor.querySelectorAll(".bad").forEach(i => i.classList.remove("bad"));
