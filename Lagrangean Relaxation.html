@@ -12,6 +12,8 @@
                                    x in X_LP,  A_k^T x <= b_k  (k not in R) }
   where R is the set of relaxed constraints, chosen with the checkboxes beside the constraint rows
   of the system at the top (checked = relaxed). h_LP(u) <= z_LP.
+  A custom LP may require x to be integer, x in X_LP ∩ Z^2 (an IP): the subproblem's domain is then the
+  convex hull of its integer points, and z_LP, h_LP, x*_LP are written z_IP, h_IP, x*_IP.
 
   The vectors A_i are the constraint normals (pointing out of the feasible side), used exactly
   as written in CONFIG (not rescaled). Appending u_i A_i for i in R to c gives the penalised
@@ -25,7 +27,8 @@
   Embed with e.g.  <iframe src="lagrangean-relaxation.html?u1=0.8&u2=0.5" width="760" height="1100"></iframe>
   Optional URL parameters: lp=1 | 2 | custom (which LP, as in the buttons at the top; default 1),
   lpdef=<custom LP> (as made with "Edit LP": [max,]c1,c2|a1,a2,le|ge,b[|a1,a2,le|ge,b]|p1,p2|p1,p2|..., or
-  with X_LP given by constraints ...|x|a1,a2,le|ge,b|a1,a2,le|ge,b|..., see specParam), u1, u2 (initial prices; u sets both), relax=12 | 1 | 2 | none
+  with X_LP given by constraints ...|x|a1,a2,le|ge,b|a1,a2,le|ge,b|...; a trailing |int makes x integer,
+  x in X_LP ∩ Z^2, see specParam), u1, u2 (initial prices; u sets both), relax=12 | 1 | 2 | none
   (default: none, or the constraints whose price is given),
   dual=0 (hide the dual-function panel), labels=1 (start with all of the figure's labels shown,
   except the coordinates of x(u); or a comma-separated list of label groups: points, constraints, xlp,
@@ -116,6 +119,7 @@
   .lppts .pt { white-space: nowrap; }
   .lppts[hidden], .lpform [hidden] { display: none; }
   .lpxmode { margin-top: 8px; color: var(--muted); }
+  .lpxmode label { margin-left: 16px; white-space: nowrap; cursor: pointer; }
   /* X_LP by constraints: one per row, beside "X_LP = {x :", the last one closing the brace */
   .lpxcons { display: grid; grid-template-columns: auto 1fr; align-items: baseline; gap: 6px 10px; margin-top: 8px; font-family: var(--math-font); }
   .lpxcons[hidden] { display: none; }
@@ -306,7 +310,8 @@
   <div class="lpeditor" id="lpEditor" hidden>
     <div class="lpform" id="lpForm"></div>
     <div class="lpxmode"><i>X</i><sub>LP</sub> given by <select id="lpXMode" aria-label="X_LP given by">
-      <option value="pts">extreme points</option><option value="cons">constraints</option></select></div>
+      <option value="pts">extreme points</option><option value="cons">constraints</option></select>
+      <label><input type="checkbox" id="lpInt"> integer <i>x</i>: <i>x</i> ∈ <i>X</i><sub>LP</sub> ∩ ℤ<sup>2</sup></label></div>
     <div class="lppts" id="lpPts"><span class="op"><i>X</i><sub>LP</sub> = conv</span>
       <button type="button" id="lpAddPt" class="add" title="Add a point" aria-label="Add a point">+</button></div>
     <div class="lpxcons" id="lpXCons" hidden><span class="op"><i>X</i><sub>LP</sub> = {<i>x</i> :</span>
@@ -336,7 +341,7 @@
       Mode:
       <label><input type="radio" name="mapmode" value="3d" checked> <span>3D</span></label>
       <label><input type="radio" name="mapmode" value="vertex"> <span>2D (Color by segment)</span></label>
-      <label><input type="radio" name="mapmode" value="value"> <span>2D (Color by value of <i>h</i><sub>LP</sub>(<i>u</i>))</span></label>
+      <label><input type="radio" name="mapmode" value="value"> <span>2D (Color by value of <i>h</i><sub class="pb">LP</sub>(<i>u</i>))</span></label>
     </div>
     <svg id="dualfig" viewBox="0 0 720 290" role="img" aria-label="The dual function h_LP plotted against the Lagrangean prices."></svg>
     <div class="dualcap" id="dualcap"></div>
@@ -421,7 +426,35 @@
   const VCOL = j => `var(--v${j % 8})`;
 
   // The current LP (LPS[lpIndex], or customLP when lpIndex is "custom") and what is derived from it; set by useLP.
-  let lpIndex, XLP, C, XLP_LABEL, XLP_OPT_LABEL, CONS, zLP, xLP, cen, customLP = null;
+  // INT: x must be integer (a custom LP may ask for it), LAT: the integer points of X_LP. zLP/xLP are then the
+  // integer optimum (labelled z_IP, x*_IP) and zRel the optimum of the LP relaxation.
+  let lpIndex, XLP, C, XLP_LABEL, XLP_OPT_LABEL, CONS, zLP, xLP, zRel, cen, customLP = null, INT = false, LAT = [];
+  const PB = () => (INT ? "IP" : "LP");                          // subscript of z, h and x*
+  const fits = (k, p) => dot(k.a, p) <= k.b + 1e-9 * (1 + Math.abs(k.b));
+  // Integer points of a convex polygon, boundary included, column by column; null if more than max.
+  function latticePts(poly, max = Infinity) {
+    if (!poly.length) return [];
+    const tol = v => 1e-9 * (1 + Math.abs(v)), xs = poly.map(p => p[0]);
+    const lo0 = Math.min(...xs), hi0 = Math.max(...xs), x0 = Math.ceil(lo0 - tol(lo0)), x1 = Math.floor(hi0 + tol(hi0));
+    if (x1 - x0 > max) return null;
+    const out = [];
+    for (let x = x0; x <= x1; x++) {
+      let lo = Infinity, hi = -Infinity;
+      poly.forEach((P, n) => {
+        const Q = poly[(n + 1) % poly.length], a = Math.min(P[0], Q[0]), b = Math.max(P[0], Q[0]);
+        if (x < a - tol(a) || x > b + tol(b)) return;
+        const ys = b - a < 1e-12 ? [P[1], Q[1]] : [P[1] + (Q[1] - P[1]) * clamp((x - P[0]) / (Q[0] - P[0]), 0, 1)];
+        ys.forEach(y => { lo = Math.min(lo, y); hi = Math.max(hi, y); });
+      });
+      for (let y = Math.ceil(lo - tol(lo)); y <= Math.floor(hi + tol(hi)); y++) {
+        out.push([x, y]);
+        if (out.length > max) return null;
+      }
+    }
+    return out;
+  }
+  // Convex hull of integer points: the extreme points of the subproblem (may be a segment or a single point).
+  const intHull = Q => (Q.length === 1 ? [Q[0]] : hull(Q));
   // Round length near v: 1, 2 or 5 times a power of 10.
   const niceLen = v => { const p = 10 ** Math.floor(Math.log10(v)), f = v / p; return p * (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10); };
   // View of a custom LP: X_LP, the origin (c is drawn from it) and the feet of the normals, with a margin,
@@ -440,6 +473,7 @@
     lpIndex = n;
     const lp = n === "custom" ? customLP : LPS[n];
     ({ XLP, C, CONS } = lp);
+    INT = !!lp.INT; LAT = INT ? lp.LAT : [];
     for (const k of CONS) {
       k.n = Math.hypot(k.a[0], k.a[1]);          // ||a||
       k.e = scale(1 / k.n, k.a);                  // unit normal, for geometry only
@@ -461,8 +495,14 @@
     }
     let feas = XLP;
     for (const k of CONS) feas = clip(feas, k.a, k.b);
-    zLP = Math.min(...feas.map(v => dot(C, v)));
+    zRel = zLP = Math.min(...feas.map(v => dot(C, v)));
     xLP = feas.find(v => dot(C, v) === zLP);
+    if (INT) {
+      const F = LAT.filter(p => CONS.every(k => fits(k, p)));
+      zLP = Math.min(...F.map(v => dot(C, v)));
+      xLP = F.find(v => dot(C, v) === zLP);
+    }
+    document.querySelectorAll(".pb").forEach(e => { e.textContent = PB(); });
     cen = scale(1 / XLP.length, XLP.reduce(add, [0, 0]));
     VIEW = n === "custom" ? autoView() : VIEW0;
     S0 = S = W / (VIEW.xmax - VIEW.xmin); vx0 = VIEW.xmin; vy1 = VIEW.ymax;
@@ -922,6 +962,8 @@
   };
   // Nearest point of the optimal set to q, snapping to x*_LP when within a few pixels of it.
   function onTieSet(q) {
+    const d = p => Math.hypot(p[0] - q[0], p[1] - q[1]);
+    if (tieShape.pts) return tieShape.pts.reduce((m, p) => (d(p) < d(m) ? p : m)).slice();   // integer x
     let r;
     if (tieShape.seg) {
       const [a, b] = tieShape.seg;
@@ -955,8 +997,11 @@
     const I = CONS.map((_, i) => i);                           // the LP's constraints (a custom LP may have one)
     const R = I.filter(i => boxes[i].checked);                 // relaxed
     const K = I.filter(i => !boxes[i].checked);                // kept as hard constraints
-    // Slider ranges for this choice of relaxed constraints.
-    const domain = K.reduce((P, i) => clip(P, CONS[i].a, CONS[i].b), XLP);
+    // Slider ranges for this choice of relaxed constraints. With integer x the subproblem's domain is the
+    // convex hull of its integer points (lpDomain ∩ ℤ²), whose extreme points are integer.
+    const lpDomain = K.reduce((P, i) => clip(P, CONS[i].a, CONS[i].b), XLP);
+    const intPts = INT ? LAT.filter(p => K.every(i => fits(CONS[i], p))) : null;
+    const domain = INT ? intHull(intPts) : lpDomain;
     const P = pieces(domain);
     if (R.length) {
       const need = neededPrices(R, P);
@@ -1017,7 +1062,7 @@
     let xs = domain[best];
     const tied = R.length
       ? P.map((p, j) => j).filter(j => P[j].cv + R.reduce((s, i) => s + u[i] * P[j].d[i], 0) <= h + 1e-9 * (1 + Math.abs(h))) : [];
-    const flat = R.length === 2 && Math.hypot(cu[0], cu[1]) < 1e-9;
+    const flat = R.length === 2 && Math.hypot(cu[0], cu[1]) < 1e-9 && domain.length > 1;
     if (flat || tied.length >= 2) {
       if (flat) tieShape = { poly: domain, has: q => inConvex(domain, q) };
       else {
@@ -1027,6 +1072,12 @@
         const ab = [b[0] - a[0], b[1] - a[1]];
         tieShape = { seg: [a, b], has: q => Math.abs(ab[0] * (q[1] - a[1]) - ab[1] * (q[0] - a[0])) < 1e-9 * (1 + dot(ab, ab))
                                          && dot([q[0] - a[0], q[1] - a[1]], ab) >= -1e-9 && dot([q[0] - b[0], q[1] - b[1]], ab) <= 1e-9 };
+      }
+      // Integer x: only the optimal integer points of that set.
+      if (INT) {
+        const pts = intPts.filter(p => dot(C, p) + R.reduce((s, i) => s + u[i] * (dot(CONS[i].a, p) - CONS[i].b), 0) <= h + 1e-9 * (1 + Math.abs(h)));
+        tieShape.pts = pts;
+        tieShape.has = q => pts.some(p => p[0] === q[0] && p[1] === q[1]);
       }
       const key = JSON.stringify([R, u]);
       if (key !== tieKey) { tieKey = key; tiePt = xs.slice(); }
@@ -1062,10 +1113,22 @@
                                   "fill-opacity": 0.35, "stroke-dasharray": "5 4" }, regions);
       xlp.style.fill = "var(--xlp-fill)"; xlp.style.stroke = "var(--xlp-stroke)";
     }
-    const d = el("polygon", { points: pts(domain), "stroke-width": 2, "stroke-linejoin": "round" }, regions);
-    d.style.fill = "var(--feas-fill)"; d.style.stroke = "var(--xlp-stroke)";
+    const d = el("polygon", { points: pts(lpDomain), "stroke-width": 2, "stroke-linejoin": "round" }, regions);
+    d.style.fill = INT ? "var(--xlp-fill)" : "var(--feas-fill)"; d.style.stroke = "var(--xlp-stroke)";
+    // Integer x: the convex hull of the subproblem's integer points, and the integer points of X_LP
+    // (faded where a kept constraint cuts them off).
+    if (INT) {
+      const ih = el("polygon", { points: pts(domain), "stroke-width": 1.5, "stroke-linejoin": "round" }, regions);
+      ih.style.fill = "var(--feas-fill)"; ih.style.stroke = "var(--xlp-stroke)";
+      const inDom = new Set(intPts.map(String));
+      LAT.forEach(p => {
+        const [x, y] = px(p);
+        const dt = el("circle", { cx: x, cy: y, r: 2.2, "fill-opacity": inDom.has(String(p)) ? 0.9 : 0.3 }, regions);
+        dt.style.fill = "var(--xlp-stroke)";
+      });
+    }
     XLP.forEach((v, n) => hitLine(px(v), px(XLP[(n + 1) % XLP.length]), "X_LP", regions));   // its outline shows its label
-    [XLP, ...(K.length ? [domain] : [])].forEach(poly => poly.forEach((v, n) => obSeg(v, poly[(n + 1) % poly.length], 0.5)));
+    [XLP, ...(K.length ? [lpDomain] : []), ...(INT ? [domain] : [])].forEach(poly => poly.forEach((v, n) => obSeg(v, poly[(n + 1) % poly.length], 0.5)));
     { const V = viewRect(); obSeg([V.xmin, 0], [V.xmax, 0], 0.3); obSeg([0, V.ymin], [0, V.ymax], 0.3); }
     // Relaxed constraints dashed, kept ones solid.
     CONS.forEach((k, i) => {
@@ -1092,6 +1155,11 @@
       const f = el("polygon", { points: pts(tieShape.poly), "stroke-width": 8, "stroke-linejoin": "round", "stroke-opacity": 0.3, "fill-opacity": 0.15 }, dyn);
       f.style.stroke = "var(--res)"; f.style.fill = "var(--res)";
     }
+    // Integer x: the optimal integer points, among which x(u) can be dragged.
+    if (tieShape && tieShape.pts) tieShape.pts.forEach(p => {
+      const [x, y] = px(p);
+      el("circle", { cx: x, cy: y, r: 4, "fill-opacity": 0.6 }, dyn).style.fill = "var(--res)";
+    });
 
     // Extreme points of the subproblem domain, coloured as in the dual panel.
     domain.forEach((v, j) => {
@@ -1192,7 +1260,7 @@
       want([["x", "it"], ["(", ""], ["u", "it"], [")", ""]], { "font-weight": "bold", "data-lab": "xs" },
            L => around(xs, 9, L, sdir([xs[0] - cen[0], xs[1] - cen[1]])));
     }
-    want([["x", "it"], ["*", "sup"], ["LP", "sub"]], { "font-weight": "bold", "data-lab": "xlp" }, L => around(xLP, 10, L, sdir(XLP_OPT_LABEL)));
+    want([["x", "it"], ["*", "sup"], [PB(), "sub"]], { "font-weight": "bold", "data-lab": "xlp" }, L => around(xLP, 10, L, sdir(XLP_OPT_LABEL)));
     CONS.forEach((k, i) => {
       const j = String(i + 1);
       // Fixed spot (labels of fixed objects don't move); the text's outline keeps it legible over lines.
@@ -1230,8 +1298,8 @@
     const xHtml = "<i>x</i>";
     const stk = (cells, cl = "") => `<span class="stk${cl}">` +
       cells.map(([v, e, c = ""]) => `<span class="val">${v}</span><span class="${c}">${e}</span>`).join("") + "</span>";
-    const lhs = stk([[`<b>${fmt(h)}</b> =`, `<span class="lhs"><span${R.length ? "" : ' class="hid"'}><i>h</i><sub>LP</sub>(<i>u</i>) =</span>` +
-                `<span${R.length ? ' class="hid"' : ""}><i>z</i><sub>LP</sub> =</span></span>`]], " end");
+    const lhs = stk([[`<b>${fmt(h)}</b> =`, `<span class="lhs"><span${R.length ? "" : ' class="hid"'}><i>h</i><sub>${PB()}</sub>(<i>u</i>) =</span>` +
+                `<span${R.length ? ' class="hid"' : ""}><i>z</i><sub>${PB()}</sub> =</span></span>`]], " end");
     // Every penalty term and constraint is always shown, in their constraint's colour; the inactive
     // one of each pair (penalty of a kept constraint, constraint that is relaxed) is dimmed and struck through.
     const inact = on => (on ? "" : " inactive");
@@ -1246,7 +1314,7 @@
                [`<span class="${n}${hid}">${v < -5e-3 ? `(${vs})` : vs}</span>`, `(${slackHtml(i + 1)})`, ex]);
     });
     const stRows = [...I.map(i => [consHtml(i), ` n${i + 1}${inact(K.includes(i))}`]),
-                    [["", "", xHtml, "&nbsp;∈&nbsp;", "<i>X</i><sub>LP</sub>"], ""]];
+                    [["", "", xHtml, "&nbsp;∈&nbsp;", "<i>X</i><sub>LP</sub>" + (INT ? "&nbsp;∩&nbsp;ℤ<sup>2</sup>" : "")], ""]];
     const relaxBox = i => `<label class="relax"><input type="checkbox" class="relax${i + 1}" data-i="${i}"` +
       `${R.includes(i) ? " checked" : ""}> Relax</label>`;
     formula.innerHTML = `<div class="f">${fRow(lhs, stk([["&nbsp;", `<span class="under"><span>min</span><i>x</i></span>`]]), stk(obj))}` +
@@ -1436,7 +1504,7 @@
     const cap = (drag, opt) =>
       `Subgradient for current <i>x</i> shown with a dot. Full subdifferential for current <i>u</i> in shaded region if it contains more than subgradient. ` +
       `The arrow from 0 is its length ‖<i>g</i>‖; with several subgradients, the dashed line goes to the shortest one. `;
-    const opt = !isOpt ? "" : R.every(i => u[i] > 1e-12) ? " Since 0 ∈ ∂<i>h</i><sub>LP</sub>(<i>u</i>), <i>u</i> is optimal." : OPT0;
+    const opt = !isOpt ? "" : R.every(i => u[i] > 1e-12) ? ` Since 0 ∈ ∂<i>h</i><sub>${PB()}</sub>(<i>u</i>), <i>u</i> is optimal.` : OPT0;
     scap.innerHTML = `<span class="hid" aria-hidden="true">${cap(true, OPT0)}</span><span>${cap(gs.length >= 2, opt)}</span>`;
   }
 
@@ -1584,7 +1652,7 @@
     [0, U[0]].forEach(v => lab([v, o1, floor], [[String(+v.toFixed(2)), ""]], { class: "small" }));
     [0, U[1]].forEach(v => lab([o2, v, floor], [[String(+v.toFixed(2)), ""]], { class: "small" }));
     const top = proj([...back, hi]);
-    labelPx(top.x, top.y - 8, [["h", "it"], ["LP", "sub"], [` ${fmt(hi)}`, ""]], { "text-anchor": "middle", class: "small" }, dsvg);
+    labelPx(top.x, top.y - 8, [["h", "it"], [PB(), "sub"], [` ${fmt(hi)}`, ""]], { "text-anchor": "middle", class: "small" }, dsvg);
 
     dcap.innerHTML =
       `<ul><li>Each face corresponds to the extreme point with the same color; level curves at every ${fmt(F.step)}.</li>` +
@@ -1592,7 +1660,7 @@
       (!SUBGRADIENTS ? "</ul>" :
       `<li>The gray plane is a supporting plane with gradient <i>g</i>(<i>x</i>(<i>u</i>)); on an edge or corner ` +
       `there are multiple subgradients, and the plane tilts as <i>g</i>(<i>x</i>(<i>u</i>)) is dragged below.</li>` +
-      `<li>Optimality requires complementarity; some <i>g</i> &isin; &part;<i>h</i><sub>LP</sub>(<i>u</i>) has, for each <i>i</i>, either` +
+      `<li>Optimality requires complementarity; some <i>g</i> &isin; &part;<i>h</i><sub>${PB()}</sub>(<i>u</i>) has, for each <i>i</i>, either` +
       `<ol><li><i>u</i><sub><i>i</i></sub> = 0 and <i>g</i><sub><i>i</i></sub> &le; 0, or</li>` +
       `<li><i>u</i><sub><i>i</i></sub> &gt; 0 and <i>g</i><sub><i>i</i></sub> = 0.</li></ol></li></ul>`);
   }
@@ -1606,7 +1674,7 @@
       const uu = Array(2).fill(0); uu[i] = U * s / N;
       env.push(evalDual(P, R, uu).h);
     }
-    let lo = Math.min(...env), hi = Math.max(...env, zLP);
+    let lo = Math.min(...env, zRel), hi = Math.max(...env, zLP);
     const pad = 0.08 * (hi - lo || 1); lo -= pad; hi += pad;
     const sx = v => X0 + (X1 - X0) * v / U, sy = v => Y1 - (Y1 - Y0) * (v - lo) / (hi - lo);
 
@@ -1622,9 +1690,11 @@
       labelPx(X0 - 8, sy(t) + 5, [[String(+t.toFixed(6)), ""]], { "text-anchor": "end", class: "small" }, dsvg);
     }
     const g = el("g", { "clip-path": "url(#dclip)" }, dsvg);
-    // z_LP (= max h_LP by LP duality, if attained within the slider range)
+    // z_LP (= max h_LP by LP duality, if attained within the slider range). Integer x: z_IP, and the LP
+    // relaxation's z_LP (dotted); max h_IP lies between them.
     const zl = el("line", { x1: X0, y1: sy(zLP), x2: X1, y2: sy(zLP), "stroke-width": 1.4, "stroke-dasharray": "6 4" }, g);
     zl.style.stroke = "var(--muted)";
+    if (INT) el("line", { x1: X0, y1: sy(zRel), x2: X1, y2: sy(zRel), "stroke-width": 1.4, "stroke-dasharray": "2 3" }, g).style.stroke = "var(--muted)";
     P.forEach((p, j) => {
       const on = sub.verts.includes(j);                            // active at u: both lines at a kink
       const e = el("line", { x1: sx(0), y1: sy(p.cv), x2: sx(U), y2: sy(p.cv + U * p.d[i]),
@@ -1645,9 +1715,10 @@
     }
     const fr = el("rect", { x: X0, y: Y0, width: X1 - X0, height: Y1 - Y0, fill: "none", "stroke-width": 1 }, dsvg);
     fr.style.stroke = "var(--axis)";
-    labelPx(X1 - 6, sy(zLP) + 16, [["z", "it"], ["LP", "sub"]], { "text-anchor": "end", class: "small" }, dsvg);
+    labelPx(X1 - 6, sy(zLP) + (INT ? -5 : 16), [["z", "it"], [PB(), "sub"]], { "text-anchor": "end", class: "small" }, dsvg);
+    if (INT) labelPx(X1 - 6, sy(zRel) + 16, [["z", "it"], ["LP", "sub"]], { "text-anchor": "end", class: "small" }, dsvg);
     labelPx(X1 + 8, Y1 + 5, [["u", "it"], [String(i + 1), "it-sub"]], {}, dsvg);
-    labelPx(X0 - 8, Y0 - 2, [["h", "it"], ["LP", "sub"]], { "text-anchor": "end" }, dsvg);
+    labelPx(X0 - 8, Y0 - 2, [["h", "it"], [PB(), "sub"]], { "text-anchor": "end" }, dsvg);
 
     const cx = sx(u[i]), cy = sy(h);
     dline(cx, cy, cx, Y1, "var(--muted)", 1, { "stroke-dasharray": "3 3" });
@@ -1665,7 +1736,7 @@
       `<li>Subdifferential in shaded white; a line when only one subgradient exists, a fan when multiple exist.</li>` +
       `<li>Optimality requires complementarity; either` +
       `<ol><li><i>u</i><sub>${i + 1}</sub> = 0 and some subgradient is &le; 0, or</li>` +
-      `<li><i>u</i><sub>${i + 1}</sub> &gt; 0 and 0 &isin; &part;<i>h</i><sub>LP</sub>(<i>u</i>).</li></ol></li></ul>`);
+      `<li><i>u</i><sub>${i + 1}</sub> &gt; 0 and 0 &isin; &part;<i>h</i><sub>${PB()}</sub>(<i>u</i>).</li></ol></li></ul>`);
   }
 
   // Both relaxed: map over (u_1, u_2), coloured by the optimal extreme point, with level curves of h_LP.
@@ -1685,7 +1756,7 @@
       bar.style.stroke = "var(--axis)";
       labelPx(BX + BW + 6, Y0 + 5, [[fmt(mapCache.hi), ""]], { class: "small" }, dsvg);
       labelPx(BX + BW + 6, Y0 + SIDE + 5, [[fmt(mapCache.lo), ""]], { class: "small" }, dsvg);
-      labelPx(BX + BW + 6, Y0 + SIDE / 2 + 5, [["h", "it"], ["LP", "sub"]], { class: "small" }, dsvg);
+      labelPx(BX + BW + 6, Y0 + SIDE / 2 + 5, [["h", "it"], [PB(), "sub"]], { class: "small" }, dsvg);
     }
 
     if (mapCache.url) el("image", { href: mapCache.url, x: X0, y: Y0, width: SIDE, height: SIDE, preserveAspectRatio: "none" }, dsvg);
@@ -1717,9 +1788,9 @@
     };
     dcap.innerHTML =
       (mapMode === "value"
-        ? `Color corresponds to the value of <i>h</i><sub>LP</sub>(<i>u</i>), from low (dark) to high (yellow). `
+        ? `Color corresponds to the value of <i>h</i><sub>${PB()}</sub>(<i>u</i>), from low (dark) to high (yellow). `
         : `Color corresponds to optimal extreme point. `) +
-      `Level curves for <i>h</i><sub>LP</sub> shown at every ${fmt(mapCache.step || 0)}. Set <i>u</i> by clicking.`;
+      `Level curves for <i>h</i><sub>${PB()}</sub> shown at every ${fmt(mapCache.step || 0)}. Set <i>u</i> by clicking.`;
   }
 
   // Raster of the 2-D dual map (data URL) and the contour step.
@@ -1811,8 +1882,9 @@
   // Made in the "Edit LP" form (or given by ?lpdef=) as a spec:
   //   { sense: "min" | "max", c: [c1, c2], cons: [{ a: [a1, a2], rel: "<=" | ">=", b }, (constraint 2, optional)],
   //     pts: [[p1, p2], ...] }  or, with X_LP given by constraints, xcons: [{ a, rel, b }, ...] in place of pts
-  // where X_LP is the convex hull of pts (sense may be left out: min). In the URL:
-  //   lpdef=[max,]c1,c2|a1,a2,le|ge,b[|a1,a2,le|ge,b]|p1,p2|p1,p2|...   or   ...|x|a1,a2,le|ge,b|...
+  // where X_LP is the convex hull of pts (sense may be left out: min); int: true makes x integer (x ∈ X_LP ∩ ℤ²).
+  // In the URL:
+  //   lpdef=[max,]c1,c2|a1,a2,le|ge,b[|a1,a2,le|ge,b]|p1,p2|p1,p2|...   or   ...|x|a1,a2,le|ge,b|...,  then |int if integer
   const fmtNum = v => String(+v.toFixed(4));
   // Spec of an LP, for filling in the form: the custom LP's own, else from the LP's data (constraints as <=).
   const specOf = lp => lp.spec ?? { sense: "min", c: lp.C.slice(), cons: lp.CONS.map(k => ({ a: k.a.slice(), rel: "<=", b: k.b })),
@@ -1820,10 +1892,12 @@
   const urlNum = v => String(+v.toPrecision(10));
   const consParam = k => [...k.a.map(urlNum), k.rel === ">=" ? "ge" : "le", urlNum(k.b)].join(",");
   const specParam = sp => [(sp.sense === "max" ? "max," : "") + sp.c.map(urlNum).join(","), ...sp.cons.map(consParam),
-    ...(sp.xcons ? ["x", ...sp.xcons.map(consParam)] : sp.pts.map(p => p.map(urlNum).join(",")))].join("|");
+    ...(sp.xcons ? ["x", ...sp.xcons.map(consParam)] : sp.pts.map(p => p.map(urlNum).join(","))), ...(sp.int ? ["int"] : [])].join("|");
   function paramSpec(s) {
     const bad = () => { throw new Error("The custom LP in the link is malformed."); };
     const g = s.split("|").map(t => t.split(","));
+    const int = g.length > 1 && g[g.length - 1].length === 1 && g[g.length - 1][0] === "int";
+    if (int) g.pop();
     const num = t => { const v = parseFloat(t); if (!Number.isFinite(v)) bad(); return v; };
     const cons = k => ({ a: [num(k[0]), num(k[1])], rel: k[2] === "ge" ? ">=" : "<=", b: num(k[3]) });
     const sense = g[0]?.length === 3 && (g[0][0] === "max" || g[0][0] === "min") ? g[0].shift() : "min";
@@ -1839,6 +1913,7 @@
       if (rest.some(p => p.length !== 2)) bad();
       sp.pts = rest.map(p => p.map(num));
     }
+    if (int) sp.int = true;
     return sp;
   }
   // Convex hull (counter-clockwise), and a polygon without repeated or collinear vertices.
@@ -1904,8 +1979,18 @@
     if (!cons.reduce((P, k) => cleanPoly(clip(P, k.a, k.b)), XLPn).length)
       throw new Error(`No point of X_LP satisfies ${cons.length > 1 ? "both constraints" : "the constraint"}, so the LP has no solution.`);
     const C = sp.sense === "max" ? sp.c.map(v => -v) : sp.c.slice();                // max c^T x as min -c^T x
-    return { name: "Custom", spec: sp, XLP: XLPn, C, CONS: cons };
+    const lp = { name: "Custom", spec: sp, XLP: XLPn, C, CONS: cons };
+    if (sp.int) {
+      const LATn = latticePts(XLPn, MAXLAT);
+      if (!LATn) throw new Error(`X_LP has too many integer points to show (over ${MAXLAT}): make it smaller.`);
+      if (!LATn.length) throw new Error("X_LP contains no integer point.");
+      if (!LATn.some(p => cons.every(k => fits(k, p))))
+        throw new Error(`No integer point of X_LP satisfies ${cons.length > 1 ? "both constraints" : "the constraint"}, so the problem has no solution.`);
+      Object.assign(lp, { INT: true, LAT: LATn });
+    }
+    return lp;
   }
+  const MAXLAT = 20000;
 
   // URL parameters: u (both prices), u1, u2, relax=12|1|2|none, dual=0, lp=1|2|custom, lpdef=<custom LP>.
   const params = new URLSearchParams(location.search);
@@ -2043,6 +2128,10 @@
   const nearSubPt = e => subDrag && Math.hypot(...subPt(e).map((v, n) => v - subDrag.at[n])) < 14;
   const gOf = (R, x) => R.map(i => dot(CONS[i].a, x) - CONS[i].b);
   function xForG(R, gs, gt) {
+    if (tieShape.pts) {                                            // integer x: the nearest in g
+      const d = p => Math.hypot(...gOf(R, p).map((v, n) => v - gt[n]));
+      return tieShape.pts.reduce((m, p) => (d(p) < d(m) ? p : m)).slice();
+    }
     if (tieShape.seg) {
       const [a, b] = tieShape.seg;
       return add(a, scale(segT(gOf(R, a), gOf(R, b), gt), [b[0] - a[0], b[1] - a[1]]));
@@ -2114,7 +2203,7 @@
   const lpEditor = document.getElementById("lpEditor"), lpForm = document.getElementById("lpForm");
   const lpPts = document.getElementById("lpPts"), lpError = document.getElementById("lpError");
   const lpXCons = document.getElementById("lpXCons"), lpXMode = document.getElementById("lpXMode");
-  const lpNote = document.getElementById("lpNote");
+  const lpNote = document.getElementById("lpNote"), lpInt = document.getElementById("lpInt");
   const xv = j => `<i>x</i><sub>${j}</sub>`;
   const numIn = (v, label) => `<input type="text" inputmode="decimal" value="${v === "" ? "" : fmtNum(v)}" aria-label="${label}">`;
   const syncDel = () => {
@@ -2186,6 +2275,7 @@
     document.getElementById("lpDelK2").addEventListener("click", () => { showCons2(false); document.getElementById("lpAddK2").focus(); });
     document.getElementById("lpAddK2").addEventListener("click", () => { showCons2(true); lpForm.querySelector(".row.k2 input").focus(); });
     setXMode(sp.xcons ? "cons" : "pts", sp);
+    lpInt.checked = !!sp.int;
     lpError.textContent = err || "";
     showCons2(sp.cons.length > 1);
     showEditor(true);
@@ -2221,6 +2311,7 @@
     const sp = { sense: lpForm.querySelector("select.sense").value, c, cons };
     if (lpXMode.value === "cons") sp.xcons = [...lpXCons.querySelectorAll(".pt")].map(consOf);
     else sp.pts = [...lpPts.querySelectorAll(".pt")].map(r => ins(r).map(num));
+    if (lpInt.checked) sp.int = true;
     return sp;
   }
   function showEditor(on) {
