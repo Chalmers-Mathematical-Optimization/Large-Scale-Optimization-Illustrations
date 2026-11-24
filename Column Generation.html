@@ -1,0 +1,1728 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Column Generation</title>
+<!--
+  Self-contained illustration of Dantzig–Wolfe column generation (no external dependencies), in the
+  notation of A.-B. Strömberg, "Lagrangean duality and column generation" (Ch. 7–9):
+
+    BLP (8.3)        z*       = min { c^T x : A x >= b, x in X },  X = { x in B^n : D x >= d } = { x^q }_{q in Q}
+    DW-MP (8.13)     z*_conv  = min { sum_q c^T x^q λ_q : sum_q A x^q λ_q >= b, sum_q λ_q = 1, λ >= 0 }
+    DW-RMP (9.5)     z̄_conv   = the same over the generated columns q in Q̄ ⊂ Q; dual solution (ū, v̄) of (9.7)
+    Pricing (9.10)   c̄_q̄(ū, v̄) = min_{q in Q} (c − A^T ū)^T x^q − v̄;  if < 0, Q̄ := Q̄ ∪ {q̄}, else z̄_conv = z*_conv
+    Bounds (9.14)    z_conv = b^T ū + min_{x in X} (c − A^T ū)^T x  <=  z*_conv  <=  z̄_conv = b^T ū + v̄
+    DW-IRMP (9.16)   z*_IRMP  = the DW-RMP with λ_q in {0, 1}, an upper bound on z* (9.17)
+
+  The rows of A x >= b may also be <= (as the resource constraint of Example 8.1; then u <= 0, Example 8.4) or =.
+  X is small and enumerated, so the pricing problem is solved by enumeration, and the optimal values
+  (z*, z*_conv, z*_LP) are known in advance ("Optimal values" under Options).
+
+  Optional URL parameters: ex=1 | 2 | 3 | 4 | custom (the problem, as in the buttons at the top),
+  def=<custom instance> (as made with "Custom", see specString), start=<initial columns, e.g. 1,3>,
+  step=<step number>, art=1 (start with the artificial column), eps=<relative gap at which to stop, (9.15)>,
+  reveal=0 (hide the optimal values), view=h | uv (the dual panel: h(u), or the dual (9.7) in (u, v)),
+  canvas or canvas=1 (light mode and a "View as standalone" link), layout=auto | vertical | horizontal.
+-->
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1d1d22; --muted: #6b6b75; --grid: #eeeef2; --axis: #a3a3ad;
+    --xlp-fill: #e3ebf7; --xlp-stroke: #4f6fa6; --feas-fill: #b8cbe8; --cons: #55555f;
+    --c: #1f5fbf; --pos: #23905a; --neg: #d8343a; --opt: #111116; --halo: #ffffff;
+    --label-halo: rgb(255 255 255 / 0.75); --label-halo-w: 2.5px;
+    --star: #f5c518; --star-edge: #111116;
+    /* the restricted master (its columns' hull, its solution), pricing, and the upper / lower bounds */
+    --rmp: #d06a10; --pr: #7d4cc0; --ub: #c0264b; --lb: #23905a;
+    /* one color per column q (cycled) */
+    --v0: #e8a317; --v1: #2f6fe0; --v2: #d6457a; --v3: #3fa34d;
+    --v4: #8e3fb8; --v5: #1fb5c4; --v6: #a8552a; --v7: #6f6f78;
+    --ctl-border: #c3c3cc; --ctl-hover: #85858f;
+    --accent: #1f5fbf; --accent-bg: #e6eefa; --on-accent: #ffffff;
+    --panel-bg: #f8f8fa;
+  }
+  :root[data-theme="dark"] {
+    --bg: #17171b; --fg: #ececf1; --muted: #a0a0ab; --grid: #26262c; --axis: #5c5c66;
+    --xlp-fill: #1f2a3d; --xlp-stroke: #7d9bd1; --feas-fill: #2f4466; --cons: #b5b5bf;
+    --c: #6fa4ff; --pos: #4fcb87; --neg: #ff6b6b; --opt: #ffffff; --halo: #17171b;
+    --star: #a67c00; --star-edge: #ffffff;
+    --label-halo: #17171b; --label-halo-w: 4px;
+    --rmp: #f39a4a; --pr: #b48cf0; --ub: #ff6688; --lb: #4fcb87;
+    --ctl-border: #44444e; --ctl-hover: #8a8a95;
+    --accent: #6fa4ff; --accent-bg: #1f2a3d; --on-accent: #0f0f12;
+    --panel-bg: #1d1d22;
+  }
+  html, body { margin: 0; background: var(--bg); color: var(--fg); }
+  html { scrollbar-gutter: stable; }
+  :root { --text-font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+          --math-font: "Latin Modern Roman", "CMU Serif", "Cambria", Georgia, serif; }
+  body { font-family: var(--text-font); }
+  .m, .blp, .mx, .eqn, svg text, .wrap i, .wrap sub, .wrap sup, .wrap .bv, .wrap .ss { font-family: var(--math-font); }
+  .wrap { position: relative; max-width: 760px; margin: 0 auto; padding: 12px 16px; box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  .wrap sub, .wrap sup { line-height: 0; }
+  /* Math: vectors bold upright, overbars (ū, v̄, z̄, λ̄, c̄, q̄, Q̄), the underlined lower bound, stacked scripts */
+  .bv { font-weight: bold; font-style: normal; }
+  .ob { position: relative; display: inline-block; line-height: 1; }
+  .ob::before { content: ""; position: absolute; left: 0.14em; right: 0; top: 0.2em; border-top: 0.065em solid currentColor; }
+  .ob.cap::before { top: -0.02em; left: 0.2em; }
+  sub .ob::before { top: 0.16em; }
+  .ul { text-decoration: underline; text-decoration-thickness: 0.065em; text-underline-offset: 0.16em; }
+  .ss { display: inline-flex; flex-direction: column; vertical-align: 0.5em; font-size: 0.72em; line-height: 0.98; margin-left: 0.05em; }
+  .fr { white-space: nowrap; }
+  .fr sup, .fr sub { font-size: 0.72em; }
+  /* Buttons */
+  .btn, .panel button { box-sizing: border-box; min-height: 30px; padding: 5px 12px;
+        display: inline-block; vertical-align: middle; text-align: center; border: 1px solid var(--ctl-border);
+        border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; font-size: 0.95rem; line-height: 1.2;
+        white-space: nowrap; text-decoration: none; cursor: pointer; transition: border-color 0.12s, background-color 0.12s; }
+  .btn:hover:not(:disabled), .panel button:hover:not(:disabled) { border-color: var(--ctl-hover); }
+  .btn:disabled { opacity: 0.4; cursor: default; }
+  .btn[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-bg); box-shadow: inset 0 0 0 1px var(--accent); }
+  .btn.primary, .panel button.primary { border-color: var(--accent); background: var(--accent); color: var(--on-accent); }
+  .btn.primary:hover:not(:disabled), .panel button.primary:hover { border-color: var(--accent); filter: brightness(1.08); }
+  .btn.quiet { color: var(--muted); font-size: 0.85rem; }
+  .btn.quiet:hover { color: var(--fg); }
+  .caret { display: inline-block; font-size: 0.75em; transition: transform 0.15s; }
+  [aria-expanded="true"] > .caret { transform: rotate(180deg); }
+  :where(button, select, input, textarea, a, tr[tabindex]):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  /* Toolbar: the problem (left), Options and the standalone link (right) */
+  .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 6px; }
+  .choice { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  .tlabel { font-size: 0.85rem; color: var(--muted); margin-right: 2px; }
+  .tools { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 6px; margin-left: auto; }
+  .panel { margin: 4px 0 10px; padding: 10px 12px; border: 1px solid var(--ctl-border); border-radius: 8px;
+           background: var(--panel-bg); font-size: 0.95rem; }
+  .phead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; margin-bottom: 8px; }
+  .ptitle { font-weight: 600; }
+  .psub { font-size: 0.85rem; color: var(--muted); }
+  /* Options */
+  .options { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px 24px; }
+  .options .grp { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; }
+  .options h3 { margin: 0 0 2px; font-size: 0.75rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+  .options label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+  .options label input { margin: 0; }
+  .panel select { min-height: 30px; padding: 2px 6px; border: 1px solid var(--ctl-border); border-radius: 6px; background: var(--bg);
+                  color: var(--fg); font: inherit; cursor: pointer; }
+  .panel select:hover { border-color: var(--ctl-hover); }
+  .options .prow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+  .options .opt { display: inline-flex; align-items: center; gap: 6px; }
+  .help { position: relative; display: inline-flex; }
+  .help > button { box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center;
+                   width: 18px; height: 18px; min-height: 0; padding: 0; border: 1px solid var(--axis);
+                   border-radius: 50%; background: var(--bg); color: var(--muted); font: 12px/1 var(--text-font); cursor: pointer; }
+  h2 .help { margin-left: 6px; vertical-align: 0.1em; }
+  h2 .help .pop { font-weight: normal; text-align: left; }
+  .help > button:hover, .help.open > button { color: var(--fg); border-color: var(--fg); }
+  .help .pop { display: none; position: absolute; z-index: 5; left: 50%; top: calc(100% + 6px); transform: translateX(-50%);
+               width: max-content; max-width: min(300px, 80vw); padding: 8px 10px; border: 1px solid var(--axis);
+               border-radius: 6px; background: var(--bg); color: var(--fg); font-size: 0.9rem; line-height: 1.45;
+               box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15); white-space: normal; }
+  .help:hover .pop, .help.open .pop { display: block; }
+  /* Custom instance */
+  .edgrid { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 8px 10px; }
+  .edgrid > label { padding-top: 4px; white-space: nowrap; }
+  .edgrid .fld { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .edgrid .hint { font-size: 0.8rem; color: var(--muted); }
+  .panel input[type=text], .panel textarea { box-sizing: border-box; width: 100%; max-width: 420px; padding: 4px 6px;
+        border: 1px solid var(--ctl-hover); border-radius: 4px; background: var(--bg); color: var(--fg);
+        font: 0.92rem ui-monospace, SFMono-Regular, Consolas, monospace; }
+  .panel textarea { resize: vertical; }
+  .panel .bad { border-color: var(--neg); outline: 1px solid var(--neg); }
+  .btns { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .err { color: var(--neg); }
+  /* The BLP */
+  .head { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 10px 28px; margin: 6px 0 4px; }
+  .blp { font-size: 1.02rem; line-height: 1.5; }
+  .blp table { border-collapse: collapse; }
+  .blp td { padding: 1px 0.35em; vertical-align: baseline; white-space: nowrap; }
+  .blp td.l { text-align: right; padding-left: 0; }
+  .blp td.r { color: var(--muted); font-size: 0.85em; padding-left: 1em; }
+  .blp .wrapok { white-space: normal; }
+  .blp .bt { font-family: var(--text-font); font-size: 0.82rem; color: var(--muted); text-align: center; margin-bottom: 2px; }
+  /* Step controls (stay at the top of the window) and the status sentence */
+  .stepbar { position: sticky; top: 0; z-index: 4; background: var(--bg); padding: 6px 0 6px; margin: 4px 0 8px;
+             border-bottom: 1px solid var(--grid); align-self: start; }
+  .stepbtns { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  .stepno { margin-left: 6px; font-size: 0.85rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .status { margin-top: 6px; font-size: 0.95rem; line-height: 1.55; min-height: 1.55em; }
+  /* Sections */
+  h2 { margin: 0 0 6px; font-size: 1rem; font-weight: 600; text-align: center; }
+  h2 i, h2 sub, h2 sup, h2 .bv { font-weight: normal; }
+  h2 .eqref { font-weight: normal; color: var(--muted); font-size: 0.9em; }
+  .main > section:not([hidden]) ~ section, .side > section + section { margin-top: 18px; padding-top: 10px; border-top: 1px solid var(--grid); }
+  .wrap.nomain > .main { display: none; }
+  .side { margin-top: 18px; }
+  .note { font-size: 0.9rem; color: var(--muted); text-align: center; margin: 6px 0; }
+  svg { width: 100%; height: auto; display: block; user-select: none; }
+  svg text { fill: var(--fg); font-size: 16px;
+             paint-order: stroke; stroke: var(--label-halo); stroke-width: var(--label-halo-w); stroke-linejoin: round; }
+  svg .small { font-size: 13px; fill: var(--muted); }
+  svg .it { font-style: italic; }
+  svg .bf { font-weight: bold; }
+  svg .ul { text-decoration: underline; }
+  svg text { pointer-events: none; }
+  svg [data-q] { cursor: pointer; }
+  .hit { fill: none; stroke: transparent; pointer-events: stroke; }
+  .hitc { fill: transparent; stroke: none; pointer-events: all; }
+  /* Hovering a column (a point, a line, a table row) highlights it everywhere */
+  .hovering .dq:not(.hot) { opacity: 0.22; }
+  .ov { opacity: 0; pointer-events: none; }
+  .ov.hot { opacity: 0.9; }
+  .legend { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 4px 16px;
+            margin: 6px 0 0; font-size: 0.82rem; color: var(--muted); }
+  .legend .li { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .legend svg { width: 22px; height: 14px; display: inline-block; flex: none; overflow: visible; }
+  div.cap { max-width: 660px; margin: 6px auto 0; padding: 0 8px; font-size: 0.88rem; color: var(--muted); line-height: 1.55; }
+  div.cap ul { margin: 0; padding-left: 1.3em; }
+  /* Segmented choice (radio buttons as pills) */
+  .seg { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 0.9rem; margin-bottom: 6px; }
+  .seg label { position: relative; display: inline-flex; cursor: pointer; }
+  .seg input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+  .seg label > span { padding: 4px 12px; border: 1px solid var(--ctl-border); border-radius: 999px; transition: border-color 0.12s, background-color 0.12s; }
+  .seg label:hover > span { border-color: var(--ctl-hover); }
+  .seg input:checked + span { border-color: var(--accent); background: var(--accent-bg); box-shadow: inset 0 0 0 1px var(--accent); }
+  .seg input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+  /* Tables: the DW-RMP as a matrix, all columns (pricing), the iterations */
+  .tw { overflow-x: auto; overflow-y: hidden; max-width: 100%; padding-bottom: 2px; }
+  table.mx { border-collapse: collapse; margin: 0 auto; font-size: 0.98rem; font-variant-numeric: tabular-nums; }
+  table.mx td, table.mx th { padding: 3px 7px; text-align: center; white-space: nowrap; font-weight: normal; }
+  table.mx .rh { text-align: right; color: var(--muted); padding-right: 10px; }
+  table.mx .sep { border-left: 1px solid var(--axis); }
+  table.mx tr.obj > * { border-bottom: 1px solid var(--axis); }
+  table.mx tr.conv > * { border-bottom: 1px solid var(--axis); }
+  table.mx td.dual { text-align: left; }
+  table.mx .pos { font-weight: bold; }
+  table.mx .new { background: color-mix(in srgb, var(--pr) 13%, transparent); color: var(--pr); }
+  table.mx .added { background: color-mix(in srgb, var(--rmp) 14%, transparent); }
+  table.mx .neg { color: var(--neg); }
+  table.mx .hot { background: var(--accent-bg); }
+  .qd { display: inline-block; width: 9px; height: 9px; margin-right: 4px; border-radius: 50%; vertical-align: 0.05em;
+        background: var(--qc); border: 1px solid var(--qc); }
+  .qd.out { background: transparent; border-color: var(--axis); }
+  table.all { margin-top: 8px; font-size: 0.92rem; }
+  table.all th { color: var(--muted); border-bottom: 1px solid var(--axis); }
+  table.all tr.pick { cursor: pointer; }
+  table.all tr.pick:hover > td { background: var(--accent-bg); }
+  table.all tr.qbar > td { background: color-mix(in srgb, var(--pr) 13%, transparent); }
+  table.all tr.hot > td { background: var(--accent-bg); }
+  table.all tr.out > td { color: var(--muted); }
+  table.its { margin-top: 8px; font-size: 0.9rem; }
+  table.its th { color: var(--muted); border-bottom: 1px solid var(--axis); }
+  table.its tr[tabindex] { cursor: pointer; }
+  table.its tr[tabindex]:hover > td { background: var(--accent-bg); }
+  table.its tr.cur > td { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  .eqn { margin: 3px 0; line-height: 1.7; text-align: center; }
+  .eqn .tag { color: var(--muted); font-size: 0.85em; margin-left: 0.6em; font-family: var(--text-font); }
+  .eqn .ok { color: var(--pos); font-family: var(--text-font); font-size: 0.92em; }
+  .eqn .bad { color: var(--neg); font-family: var(--text-font); font-size: 0.92em; }
+  .more { font-size: 0.85rem; color: var(--muted); text-align: center; margin-top: 4px; }
+  /* Layout: figures (left) and algebra (right) side by side when wide */
+  .wrap.horizontal { max-width: 1560px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 30px; }
+  .wrap.horizontal > .top, .wrap.horizontal > .stepbar { grid-column: 1 / -1; }
+  .wrap.horizontal > .side { margin-top: 0; }
+  .wrap.horizontal .panel { max-width: 760px; margin: 4px auto 10px; }
+  @media (min-width: 1100px) {
+    .wrap.auto { max-width: 1560px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 30px; }
+    .wrap.auto > .top, .wrap.auto > .stepbar { grid-column: 1 / -1; }
+    .wrap.auto > .side { margin-top: 0; }
+    .wrap.auto .panel { max-width: 760px; margin: 4px auto 10px; }
+  }
+  .wrap.nomain { display: block; max-width: 760px; }
+</style>
+</head>
+<body>
+<div class="wrap auto" id="page">
+  <div class="top">
+  <div class="toolbar">
+    <div class="choice" id="exChoice" role="group" aria-label="Problem">
+      <span class="tlabel" aria-hidden="true">Problem</span>
+      <button type="button" class="btn" id="exCustom" aria-expanded="false" aria-controls="editor"
+              title="Enter your own instance">Custom <span class="caret" aria-hidden="true">▾</span></button></div>
+    <div class="tools">
+      <button type="button" class="btn" id="optToggle" aria-expanded="false" aria-controls="optPanel">Options <span class="caret" aria-hidden="true">▾</span></button>
+      <a class="btn quiet" id="corner" hidden target="_blank" rel="noopener" title="Open in a new tab (GitHub Pages)"
+         href="https://chalmers-mathematical-optimization.github.io/Large-Scale-Optimization-Illustrations/Column%20Generation.html">View as standalone ↗</a>
+    </div>
+  </div>
+  <div class="options panel" id="optPanel" hidden>
+    <div class="grp">
+      <h3>Show</h3>
+      <span class="opt"><label><input type="checkbox" id="optReveal" checked> Optimal values</label><span class="help">
+        <button type="button" aria-label="About optimal values">?</button>
+        <span class="pop" role="tooltip"><i>z</i><sup>*</sup>, <i>z</i><sup>*</sup><sub>conv</sub>, <i>z</i><sup>*</sup><sub>LP</sub>,
+          <b class="bv">x</b><sup>*</sup>, the hull of all columns and the dual function <i>h</i>: known here by enumerating <i>X</i>,
+          but not to the algorithm, which sees <i>X</i> only through the pricing problem</span>
+      </span></span>
+    </div>
+    <div class="grp">
+      <h3>Algorithm</h3>
+      <span class="opt"><label><input type="checkbox" id="optArt"> Start with an artificial column</label><span class="help">
+        <button type="button" aria-label="About the artificial column">?</button>
+        <span class="pop" role="tooltip" id="artHelp"></span>
+      </span></span>
+      <span class="opt"><label>Stop at relative gap (9.15) ≤ <select id="optEps">
+        <option value="0">0</option><option value="0.01">1 %</option><option value="0.05">5 %</option>
+        <option value="0.1">10 %</option><option value="0.25">25 %</option></select></label></span>
+    </div>
+    <div class="grp">
+      <h3>Display</h3>
+      <div class="prow">
+        <label>Layout <select id="optLayout">
+          <option value="auto">Auto</option>
+          <option value="vertical">Vertical</option>
+          <option value="horizontal">Horizontal</option>
+        </select></label>
+        <label>Theme <select id="optTheme">
+          <option value="auto">Auto</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select></label>
+      </div>
+    </div>
+  </div>
+  <div class="editor panel" id="editor" hidden>
+    <div class="phead"><span class="ptitle">Custom instance</span>
+      <span class="psub">min <b class="bv">c</b><sup>⊤</sup><b class="bv">x</b> s.t. <i>A</i><b class="bv">x</b> ≥ <b class="bv">b</b> (or ≤, =),
+        <b class="bv">x</b> ∈ <i>X</i>. Numbers may be fractions (1/3). Edit, then Apply.</span></div>
+    <div class="edgrid">
+      <label for="edC"><b class="bv">c</b> =</label>
+      <div class="fld"><input type="text" id="edC" spellcheck="false" autocomplete="off">
+        <span class="hint">objective coefficients, comma-separated; their number is <i>n</i> (at most 12)</span></div>
+      <label for="edA"><i>A</i><b class="bv">x</b> ≥ <b class="bv">b</b></label>
+      <div class="fld"><textarea id="edA" rows="2" spellcheck="false"></textarea>
+        <span class="hint">the complicating constraints: one row per line, e.g. <code>1, 1/3 &gt;= 2/3</code> (&gt;=, &lt;= or =; 1 to 3 rows)</span></div>
+      <label for="edXMode"><i>X</i> given by</label>
+      <div class="fld"><select id="edXMode">
+          <option value="cons">binary points satisfying constraints, X = {x ∈ 𝔹ⁿ : Dx ≥ d}</option>
+          <option value="pts">a list of points</option></select></div>
+      <label for="edX" id="edXLabel"><i>D</i><b class="bv">x</b> ≥ <b class="bv">d</b></label>
+      <div class="fld"><textarea id="edX" rows="3" spellcheck="false"></textarea>
+        <span class="hint" id="edXHint"></span></div>
+      <label for="edQ">Initial <span class="ob cap"><i>Q</i></span></label>
+      <div class="fld"><input type="text" id="edQ" spellcheck="false" autocomplete="off" placeholder="automatic">
+        <span class="hint">indices <i>q</i> of the columns to start with (as listed under Pricing); empty: one satisfying <i>A</i><b class="bv">x</b> ≥ <b class="bv">b</b></span></div>
+    </div>
+    <div class="btns"><button type="button" id="edApply" class="primary">Apply</button><button type="button" id="edClose">Close</button>
+      <button type="button" id="edLink" title="Copy a link to this instance">Copy link</button>
+      <span class="err" id="edError" role="alert"></span></div>
+  </div>
+  <div class="head">
+    <div class="blp" id="blp"></div>
+  </div>
+  </div>
+  <div class="stepbar" id="stepbar">
+    <div class="stepbtns">
+      <button type="button" class="btn" id="bReset" title="Back to the initial columns (Home)">⏮ Start</button>
+      <button type="button" class="btn" id="bBack" title="Previous step (←)">◀ Back</button>
+      <button type="button" class="btn primary" id="bStep" title="Next step (→)">Step ▶</button>
+      <button type="button" class="btn" id="bRun" title="Step automatically">Run</button>
+      <button type="button" class="btn" id="bEnd" title="To the last step (End)">End ⏭</button>
+      <span class="stepno" id="stepno"></span>
+    </div>
+    <div class="status" id="status" aria-live="polite"></div>
+  </div>
+  <div class="main">
+    <section id="primSec">
+      <h2 id="primHead"></h2>
+      <svg id="prim" viewBox="0 0 720 400" role="img" aria-label="The set X, its convex hull and the generated columns in x-space"></svg>
+      <div class="legend" id="primLeg"></div>
+    </section>
+    <section id="colSec">
+      <h2>Column space <span class="eqref">(<i>A</i><b class="bv">x</b><sup><i>q</i></sup>, <b class="bv">c</b><sup>⊤</sup><b class="bv">x</b><sup><i>q</i></sup>)</span><span class="help">
+        <button type="button" aria-label="About this plot">?</button>
+        <span class="pop" role="tooltip">Each column <i>q</i> is a point. <span class="ob"><i>z</i></span><sub>conv</sub> is the lowest point of the
+          hull of <span class="ob cap"><i>Q</i></span> on the line <i>a</i> = <i>b</i>. <span class="ob"><i>c</i></span><sub><i>q</i></sub> (9.8) is the height of point
+          <i>q</i> above the dual line; a point below it improves.</span></span></h2>
+      <svg id="colfig" viewBox="0 0 720 330" role="img" aria-label="Each column as a point (A x^q, c^T x^q), with the hull of the generated columns and the line of the dual solution"></svg>
+      <div class="cap" id="colCap"></div>
+    </section>
+    <section id="dualSec">
+      <h2><span id="dualHead"></span><span class="help">
+        <button type="button" aria-label="About this plot">?</button>
+        <span class="pop" role="tooltip" id="dualHelp"></span></span></h2>
+      <div class="seg" id="dualView" role="radiogroup" aria-label="View of the dual">
+        <label><input type="radio" name="dualview" value="h" checked><span><i>h</i>(<b class="bv">u</b>)</span></label>
+        <label><input type="radio" name="dualview" value="uv"><span>(<b class="bv">u</b>, <i>v</i>)</span></label>
+      </div>
+      <svg id="dualfig" viewBox="0 0 720 320" role="img" aria-label="The Lagrangean dual function and its cutting-plane model, or the dual of the DW-RMP"></svg>
+      <div class="cap" id="dualCap"></div>
+    </section>
+  </div>
+  <div class="side">
+    <section>
+      <h2>DW-RMP <span class="eqref">(9.5)</span> and dual <span class="eqref">(9.7)</span></h2>
+      <div class="tw" id="rmp"></div>
+    </section>
+    <section>
+      <h2>Pricing <span class="eqref">(9.9)–(9.10)</span></h2>
+      <div id="pricing"></div>
+    </section>
+    <section>
+      <h2>Bounds <span class="eqref">(9.14)–(9.15)</span></h2>
+      <svg id="bounds" viewBox="0 0 720 230" role="img" aria-label="Upper and lower bounds on the optimal value of the DW-MP per iteration"></svg>
+      <div class="legend" id="boundsLeg"></div>
+      <div class="tw" id="iters"></div>
+    </section>
+  </div>
+</div>
+
+<script>
+(() => {
+  "use strict";
+  // ---------------------------------------------------------------- the examples
+  // c, A (rows), rel ("ge" | "le" | "eq"), b; X = { x in B^n : D x (drel) d } (D: [] for B^n), listed in the
+  // order of the PDF (pts); start: the initial columns (0-based q).
+  const GRAPH = {
+    // Example 2.1 / 8.1: nodes at grid positions, arcs (i, j, c_ij, r_ij, label offset in px)
+    nodes: { 1: [0, 1], 2: [1, 2], 3: [2, 1], 4: [1, 0], 5: [3, 2], 6: [3, 0], 7: [4, 1] }, s: 1, t: 7, R: 8,
+    arcs: [[1, 2, 2, 4, [-12, -9]], [1, 4, 2, 3, [-12, 17]], [2, 3, 1, 3, [12, -9]], [2, 5, 9, 1, [0, -9]],
+           [3, 5, 6, 1, [-12, -9]], [3, 6, 3, 2, [-12, 17]], [4, 3, 2, 2, [12, 17]], [4, 6, 5, 2, [0, 21]],
+           [5, 7, 2, 1, [12, -9]], [6, 5, 4, 2, [10, 5]], [6, 7, 8, 1, [12, 17]]],
+  };
+  const EXAMPLES = [
+    { btn: "Ex. 7.1", title: "Examples 7.1–7.2",
+      c: [1, 1], A: [[1, 1 / 3]], rel: ["ge"], b: [2 / 3], D: [], drel: [], d: [],
+      pts: [[1, 1], [0, 0], [1, 0], [0, 1]], start: [0] },
+    { btn: "Ex. 8.3", title: "Example 8.3",
+      c: [1, 2], A: [[2, 3]], rel: ["ge"], b: [2], D: [[-1, 2]], drel: ["ge"], d: [0],
+      pts: [[0, 0], [0, 1], [1, 1]], start: [2] },
+    { btn: "Ex. 4.8", title: "Example 4.8",
+      c: [5, 8, 7, 9], A: [[3, 2, 2, 4]], rel: ["ge"], b: [6], D: [[2, 1, 2, 1], [-2, -1, -2, -1]], drel: ["ge", "ge"], d: [3, -3],
+      pts: [[1, 1, 0, 0], [1, 0, 0, 1], [0, 1, 1, 0], [0, 0, 1, 1]], start: [1] },
+    { btn: "Ex. 8.1: paths", title: "Example 8.1 on the graph of Example 2.1", graph: GRAPH, start: [8] },
+  ];
+
+  const NS = "http://www.w3.org/2000/svg";
+  const $ = id => document.getElementById(id);
+  const TOL = 1e-9;
+  const dot = (a, b) => a.reduce((s, v, i) => s + v * b[i], 0);
+  const range = n => [...Array(n).keys()];
+  const REL = { ge: "≥", le: "≤", eq: "=" };
+  const relOk = (v, r, b) => r === "ge" ? v >= b - TOL : r === "le" ? v <= b + TOL : Math.abs(v - b) <= TOL;
+
+  // ---------------------------------------------------------------- numbers
+  // Values are floats; those that are fractions p/d with d <= 120 are written as such.
+  function ratio(v) {
+    if (!Number.isFinite(v)) return null;
+    for (let d = 1; d <= 120; d++) {
+      const p = Math.round(v * d);
+      if (Math.abs(p - v * d) < 1e-8 * d * Math.max(1, Math.abs(v))) return [p, d];
+    }
+    return null;
+  }
+  const numStr = v => {
+    if (v === Infinity) return "∞";
+    if (v === -Infinity) return "−∞";
+    if (Math.abs(v) < 1e-10) return "0";
+    const f = ratio(v);
+    return (!f ? String(+v.toPrecision(4)) : f[1] === 1 ? String(f[0]) : f[0] + "/" + f[1]).replace("-", "−");
+  };
+  const numH = v => {
+    const f = Math.abs(v) < 1e-10 ? [0, 1] : ratio(v);
+    if (!f || f[1] === 1) return numStr(v);
+    return (f[0] < 0 ? "−" : "") + `<span class="fr"><sup>${Math.abs(f[0])}</sup>⁄<sub>${f[1]}</sub></span>`;
+  };
+  const parseNum = s => {
+    const t = s.trim().replace(/[−–]/g, "-"), f = t.split("/");
+    if (!t || f.length > 2 || !f.every(p => /^[+-]?(\d+\.?\d*|\.\d+)$/.test(p.trim()))) return NaN;
+    return f.map(Number).reduce((p, q) => p / q);
+  };
+  const vecH = v => "(" + v.map(numH).join(", ") + ")";
+  const vecS = v => "(" + v.map(numStr).join(", ") + ")";
+
+  // ---------------------------------------------------------------- math in HTML (as in the PDF)
+  const I = s => `<i>${s}</i>`, B = s => `<b class="bv">${s}</b>`, SUB = s => `<sub>${s}</sub>`, SUP = s => `<sup>${s}</sup>`;
+  const OB = (s, cap) => `<span class="ob${cap ? " cap" : ""}">${s}</span>`;
+  const SS = (sup, sub) => `<span class="ss"><span>${sup}</span><span>${sub}</span></span>`;
+  const T = SUP("⊤");
+  const H = {
+    x: B("x"), c: B("c"), b: B("b"), u: B("u"), d: B("d"), A: I("A"), D: I("D"), X: I("X"), Q: I("Q"), v: I("v"),
+    xq: B("x") + SUP(I("q")), lq: I("λ") + SUB(I("q")),
+    ub: OB(B("u")), vb: OB(I("v")), qb: OB(I("q")), Qb: OB(I("Q"), 1), lb: OB(I("λ")) + SUB(I("q")),
+    zb: OB(I("z")) + SUB("conv"), zl: `<span class="ul">${I("z")}</span>` + SUB("conv"),
+    zc: I("z") + SS("*", "conv"), zs: I("z") + SUP("*"), zLP: I("z") + SS("*", "LP"), zI: I("z") + SS("*", "IRMP"),
+    zmax: I("z") + SS("max", "conv"), hs: I("h") + SUP("*"),
+    cbq: OB(I("c")) + SUB(I("q")), cbqb: OB(I("c")) + SUB(OB(I("q"))), xqb: B("x") + SUP(OB(I("q"))),
+    Xconv: I("X") + SUB("conv"), XLP: I("X") + SUB("LP"), Bn: n => "𝔹" + SUP(n),
+  };
+  H.red = `(${H.c} − ${H.A}${T}${H.ub})`;
+  H.uv = `(${H.ub}, ${H.vb})`;
+  const xj = j => I("x") + SUB(j + 1);
+  // a^T x written out with the variables var(j)
+  function termsH(a, v = xj) {
+    let s = "";
+    a.forEach((c, j) => {
+      if (Math.abs(c) < 1e-12) return;
+      s += s ? (c < 0 ? " − " : " + ") : c < 0 ? "−" : "";
+      s += (Math.abs(Math.abs(c) - 1) < 1e-12 ? "" : numH(Math.abs(c))) + v(j);
+    });
+    return s || "0";
+  }
+
+  // ---------------------------------------------------------------- LP solver
+  // min c^T x  s.t.  A x (rel) b,  x >= 0. Dense two-phase simplex with Bland's rule.
+  // Returns { status, x, z, y }, y the dual solution (c − A^T y >= 0; y_i >= 0 for >=, <= 0 for <= rows).
+  function lp(c, A, rel, b) {
+    const m = A.length, n = c.length;
+    const sg = b.map(v => (v < 0 ? -1 : 1));
+    const R = rel.map((r, i) => (sg[i] > 0 ? r : r === "ge" ? "le" : r === "le" ? "ge" : "eq"));
+    let N = n;
+    const slack = R.map(r => (r === "eq" ? -1 : N++));
+    const art = R.map(r => (r === "le" ? -1 : N++));
+    const isArt = new Array(N).fill(false);
+    art.forEach(j => { if (j >= 0) isArt[j] = true; });
+    const Tb = A.map((row, i) => {
+      const t = new Array(N + 1).fill(0);
+      row.forEach((v, j) => { t[j] = sg[i] * v; });
+      if (slack[i] >= 0) t[slack[i]] = R[i] === "le" ? 1 : -1;
+      if (art[i] >= 0) t[art[i]] = 1;
+      t[N] = sg[i] * b[i];
+      return t;
+    });
+    const basis = R.map((r, i) => (r === "le" ? slack[i] : art[i]));
+    const pivot = (r, s) => {
+      const pr = Tb[r], pv = pr[s];
+      for (let k = 0; k <= N; k++) pr[k] /= pv;
+      for (let i = 0; i < m; i++) {
+        if (i === r) continue;
+        const f = Tb[i][s];
+        if (Math.abs(f) < 1e-15) continue;
+        const row = Tb[i];
+        for (let k = 0; k <= N; k++) row[k] -= f * pr[k];
+      }
+      basis[r] = s;
+    };
+    const run = (cost, allowed) => {
+      for (let it = 0; it < 10000; it++) {
+        let s = -1;
+        for (let j = 0; j < N && s < 0; j++) {
+          if (!allowed(j) || basis.includes(j)) continue;
+          let d = cost[j];
+          for (let i = 0; i < m; i++) d -= cost[basis[i]] * Tb[i][j];
+          if (d < -1e-10) s = j;
+        }
+        if (s < 0) return "opt";
+        let r = -1, best = Infinity;
+        for (let i = 0; i < m; i++) {
+          if (Tb[i][s] <= 1e-10) continue;
+          const q = Tb[i][N] / Tb[i][s];
+          if (q < best - 1e-12 || (q <= best + 1e-12 && basis[i] < basis[r])) { best = q; r = i; }
+        }
+        if (r < 0) return "unbounded";
+        pivot(r, s);
+      }
+      return "cycling";
+    };
+    if (art.some(j => j >= 0)) {
+      const c1 = new Array(N).fill(0);
+      art.forEach(j => { if (j >= 0) c1[j] = 1; });
+      run(c1, () => true);
+      const w = Tb.reduce((s, row, i) => s + c1[basis[i]] * row[N], 0);
+      if (w > 1e-7) return { status: "infeasible" };
+      for (let i = 0; i < m; i++) {
+        if (!isArt[basis[i]]) continue;
+        for (let j = 0; j < N; j++) if (!isArt[j] && Math.abs(Tb[i][j]) > 1e-9) { pivot(i, j); break; }
+      }
+    }
+    const c2 = new Array(N).fill(0);
+    c.forEach((v, j) => { c2[j] = v; });
+    const st = run(c2, j => !isArt[j]);
+    if (st !== "opt") return { status: st };
+    const x = new Array(n).fill(0);
+    basis.forEach((j, i) => { if (j < n) x[j] = Tb[i][N]; });
+    // y_i = c_B^T B^-1 e_i, where B^-1 e_i is the current column of row i's initial basic variable
+    const y = R.map((r, i) => {
+      const col = r === "le" ? slack[i] : art[i];
+      let s = 0;
+      for (let k = 0; k < m; k++) s += c2[basis[k]] * Tb[k][col];
+      return sg[i] * s;
+    });
+    return { status: "opt", x, z: dot(c, x), y };
+  }
+
+  // ---------------------------------------------------------------- geometry (x-space, n = 2)
+  const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  function hull(P) {                                  // convex hull, counter-clockwise (Andrew's monotone chain)
+    const p = [...P].sort((a, b) => a[0] - b[0] || a[1] - b[1]).filter((q, i, s) => !i || q[0] !== s[i - 1][0] || q[1] !== s[i - 1][1]);
+    if (p.length < 3) return p;
+    const lo = [], up = [];
+    for (const q of p) { while (lo.length >= 2 && cross(lo[lo.length - 2], lo[lo.length - 1], q) <= 1e-12) lo.pop(); lo.push(q); }
+    for (const q of [...p].reverse()) { while (up.length >= 2 && cross(up[up.length - 2], up[up.length - 1], q) <= 1e-12) up.pop(); up.push(q); }
+    return lo.slice(0, -1).concat(up.slice(0, -1));
+  }
+  function clip(poly, a, b) {                         // the part of a convex polygon with a^T x <= b
+    const out = [];
+    for (let i = 0; i < poly.length; i++) {
+      const P = poly[i], Q = poly[(i + 1) % poly.length];
+      const fp = dot(a, P) - b, fq = dot(a, Q) - b;
+      if (fp <= 1e-12) out.push(P);
+      if ((fp < -1e-12 && fq > 1e-12) || (fp > 1e-12 && fq < -1e-12)) { const t = fp / (fp - fq); out.push([P[0] + t * (Q[0] - P[0]), P[1] + t * (Q[1] - P[1])]); }
+    }
+    return out;
+  }
+  // { x : a^T x (rel) b } as half-planes a^T x <= b
+  const halfPlanes = (a, r, b) => (r === "ge" ? [[a.map(v => -v), -b]] : r === "le" ? [[a, b]] : [[a, b], [a.map(v => -v), -b]]);
+  const clipRel = (poly, a, r, b) => halfPlanes(a, r, b).reduce((p, [aa, bb]) => (p.length ? clip(p, aa, bb) : p), poly);
+
+  // ---------------------------------------------------------------- instances
+  // The columns q = 0, 1, ... (shown as q + 1) are the points x^q of X; q = -1 is the artificial column.
+  const ART = -1;
+  function pathSpec(g) {
+    const arcs = g.arcs, nodes = Object.keys(g.nodes).map(Number), paths = [];
+    const dfs = (v, used) => {
+      if (v === g.t) { paths.push([...used]); return; }
+      arcs.forEach((a, j) => { if (a[0] === v) { used.push(j); dfs(a[1], used); used.pop(); } });
+    };
+    dfs(g.s, []);
+    const n = arcs.length;
+    return {
+      c: arcs.map(a => a[2]), A: [arcs.map(a => a[3])], rel: ["le"], b: [g.R],
+      // flow conservation (8.6b): − (out) + (in) = d_k, d_s = −1, d_t = 1
+      D: nodes.map(k => arcs.map(a => (a[0] === k ? -1 : a[1] === k ? 1 : 0))), drel: nodes.map(() => "eq"),
+      d: nodes.map(k => (k === g.s ? -1 : k === g.t ? 1 : 0)),
+      pts: paths.map(p => range(n).map(j => (p.includes(j) ? 1 : 0))),
+      pathNodes: paths.map(p => [g.s, ...p.map(j => arcs[j][1])]),
+    };
+  }
+  function makeInst(spec0) {
+    const spec = spec0.graph ? { ...pathSpec(spec0.graph), ...spec0 } : spec0;
+    const { c, A, rel, b } = spec, n = c.length, m = A.length;
+    if (n < 1 || n > 12) throw new Error("Use 1 to 12 variables.");
+    if (m < 1 || m > 3) throw new Error("Give 1 to 3 rows of A x ≥ b.");
+    if (A.some(r => r.length !== n)) throw new Error(`Each row of A needs ${n} numbers (as many as in c).`);
+    const hasD = Array.isArray(spec.D);
+    if (hasD && spec.D.some(r => r.length !== n)) throw new Error(`Each row of D needs ${n} numbers (as many as in c).`);
+    let pts = spec.pts;
+    if (!pts) {
+      pts = [];
+      for (let k = 0; k < 2 ** n; k++) {
+        const x = range(n).map(j => (k >> (n - 1 - j)) & 1);
+        if (spec.D.every((row, i) => relOk(dot(row, x), spec.drel[i], spec.d[i]))) pts.push(x);
+      }
+    }
+    if (pts.some(p => p.length !== n)) throw new Error(`Each point needs ${n} coordinates (as many as in c).`);
+    if (!pts.length) throw new Error("X is empty: no binary point satisfies D x ≥ d.");
+    if (pts.length > 300) throw new Error(`X has ${pts.length} points; at most 300 are supported.`);
+    const cols = pts.map((x, q) => {
+      const a = A.map(r => dot(r, x));
+      return { q, x, c: dot(c, x), a, feas: a.every((v, i) => relOk(v, rel[i], b[i])) };
+    });
+    const cs = cols.map(k => k.c), cmax = Math.max(...cs), cmin = Math.min(...cs);
+    const art = { q: ART, x: null, c: Math.ceil(cmax + Math.max(1, cmax - cmin)), a: b.slice(), feas: true, art: true };
+    const inst = { ...spec, n, m, cols, art, hasD, binary: pts.every(p => p.every(v => v === 0 || v === 1)) };
+    // Optimal values (by enumeration): z*, the DW-MP (z*_conv), the LP relaxation (z*_LP, X_LP given by D)
+    const feas = cols.filter(k => k.feas);
+    inst.zStar = feas.length ? Math.min(...feas.map(k => k.c)) : Infinity;
+    inst.qStar = feas.length ? feas.find(k => k.c === inst.zStar).q : null;
+    const mp = solveRMP(inst, cols.map(k => k.q));
+    inst.mp = mp;                                       // null: the DW-MP is infeasible
+    inst.xConv = mp ? range(n).map(j => mp.lam.reduce((s, l, i) => s + l * cols[i].x[j], 0)) : null;
+    if (hasD && inst.binary) {
+      const rows = [...A, ...spec.D, ...range(n).map(j => range(n).map(k => (k === j ? 1 : 0)))];
+      const r = lp(c, rows, [...rel, ...spec.drel, ...range(n).map(() => "le")], [...b, ...spec.d, ...range(n).map(() => 1)]);
+      inst.lpRel = r.status === "opt" ? r : null;
+    }
+    if (n === 2) {
+      inst.conv = hull(pts);
+      if (hasD && inst.binary) inst.XLP = spec.D.reduce((P, row, i) => clipRel(P, row, spec.drel[i], spec.d[i]), [[0, 0], [1, 0], [1, 1], [0, 1]]);
+    }
+    return inst;
+  }
+  const col = q => (q === ART ? inst.art : inst.cols[q]);
+  const qName = q => (q === ART ? "a" : String(q + 1));
+  const qColor = q => (q === ART ? "var(--muted)" : `var(--v${q % 8})`);
+  // x^q written out: the path's nodes, or the point
+  const xLabel = q => q === ART ? "artificial" : inst.pathNodes ? inst.pathNodes[q].join("–")
+    : inst.n <= 6 ? vecS(inst.cols[q].x) : inst.cols[q].x.join("");
+
+  // ---------------------------------------------------------------- the DW-RMP (9.5) and its dual (9.7)
+  function solveRMP(I0, Qb) {
+    const ks = Qb.map(q => (q === ART ? I0.art : I0.cols[q]));
+    const A = [...I0.rel.map((r, i) => ks.map(k => k.a[i])), ks.map(() => 1)];
+    const r = lp(ks.map(k => k.c), A, [...I0.rel, "eq"], [...I0.b, 1]);
+    if (r.status !== "opt") return null;
+    return { lam: r.x, z: r.z, u: r.y.slice(0, I0.m), v: r.y[I0.m] };
+  }
+
+  // ---------------------------------------------------------------- the run of column generation
+  // Steps: init, then per iteration k a solved DW-RMP ("rmp") and a solved pricing problem ("price"),
+  // and finally the DW-IRMP ("irmp"). picks[k] is a column chosen by the user in pricing step k
+  // (any column with negative reduced cost may enter).
+  function buildHistory(initQ, picks, opt) {
+    const steps = [];
+    let Qb = [...initQ];
+    if (opt.art && !Qb.includes(ART)) Qb.unshift(ART);
+    let artAuto = false;
+    if (!solveRMP(inst, Qb)) { Qb.unshift(ART); artAuto = true; }
+    steps.push({ kind: "init", k: 0, Qb: [...Qb], artAuto });
+    let zmax = -Infinity, added = null;
+    for (let k = 1; k <= 300; k++) {
+      const r = solveRMP(inst, Qb);
+      const lamOf = q => r.lam[Qb.indexOf(q)] ?? 0;
+      const artLam = Qb.includes(ART) ? lamOf(ART) : 0;
+      const xbar = artLam > 1e-9 ? null : range(inst.n).map(j => Qb.reduce((s, q, i) => (q === ART ? s : s + r.lam[i] * inst.cols[q].x[j]), 0));
+      const base = { k, Qb: [...Qb], lam: r.lam, z: r.z, u: r.u, v: r.v, xbar, artLam, added, lamOf };
+      steps.push({ kind: "rmp", ...base });
+      const pv = inst.cols.map(kq => kq.c - dot(r.u, kq.a));           // (c − A^T ū)^T x^q
+      const red = pv.map(p => p - r.v);                                 // c̄_q(ū, v̄), (9.8)
+      let qmin = 0;
+      pv.forEach((p, q) => { if (p < pv[qmin] - 1e-10) qmin = q; });
+      const optimal = red[qmin] >= -1e-9;
+      const pick = picks[k];
+      const qbar = !optimal && pick != null && red[pick] < -1e-9 ? pick : qmin;
+      const lower = dot(inst.b, r.u) + pv[qmin];                       // z_conv, (9.14)
+      zmax = Math.max(zmax, lower);
+      const gap = Math.abs(r.z) > 1e-9 ? (r.z - zmax) / Math.abs(r.z) : r.z - zmax;
+      const gapStop = !optimal && opt.eps > 0 && gap <= opt.eps + 1e-12;
+      const pr = { ...base, pv, red, qmin, qbar, picked: qbar !== qmin, cbar: red[qbar], lower, zmax, gap, optimal, gapStop, stop: optimal || gapStop };
+      steps.push({ kind: "price", ...pr });
+      if (pr.stop) {
+        // DW-IRMP (9.16): one λ_q = 1 among the generated columns that satisfy A x >= b
+        const fq = Qb.filter(q => q !== ART && inst.cols[q].feas);
+        const qI = fq.length ? fq.reduce((p, q) => (inst.cols[q].c < inst.cols[p].c ? q : p)) : null;
+        steps.push({ ...pr, kind: "irmp", qI, zI: qI === null ? Infinity : inst.cols[qI].c });
+        break;
+      }
+      Qb.push(qbar);
+      added = qbar;
+    }
+    return steps;
+  }
+
+  // ---------------------------------------------------------------- SVG
+  // Attributes with null / undefined / false values are skipped. Colors go in style (CSS variables).
+  function el(tag, attrs, parent) {
+    const e = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) if (v !== null && v !== undefined && v !== false) e.setAttribute(k, v);
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  const f2 = v => String(Math.round(v * 100) / 100);
+  const ptsStr = P => P.map(p => f2(p[0]) + "," + f2(p[1])).join(" ");
+  const line = (g, [x1, y1], [x2, y2], style, extra = {}) =>
+    el("line", { x1: f2(x1), y1: f2(y1), x2: f2(x2), y2: f2(y2), style, ...extra }, g);
+  const circ = (g, [cx, cy], r, style, extra = {}) => el("circle", { cx: f2(cx), cy: f2(cy), r, style, ...extra }, g);
+  const poly = (g, P, style, extra = {}) => el("polygon", { points: ptsStr(P), style, ...extra }, g);
+  const polyline = (g, P, style, extra = {}) => el("polyline", { points: ptsStr(P), style, ...extra }, g);
+  const diamond = (g, [x, y], r, style) => poly(g, [[x, y - r], [x + r, y], [x, y + r], [x - r, y]], style);
+  const starPts = (x, y, r) => range(10).map(i => {
+    const a = -Math.PI / 2 + (i * Math.PI) / 5, rr = i % 2 ? r * 0.45 : r;
+    return [x + rr * Math.cos(a), y + rr * Math.sin(a)];
+  });
+  const star = (g, p, r = 11) => poly(g, starPts(p[0], p[1], r), "fill: var(--star); stroke: var(--star-edge); stroke-width: 1.2");
+  function arrowPx(g, [x1, y1], [x2, y2], color, { width = 2.4, head = 11, dash } = {}) {
+    const L = Math.hypot(x2 - x1, y2 - y1);
+    if (L < 1) return;
+    const ux = (x2 - x1) / L, uy = (y2 - y1) / L, h = Math.min(head, L * 0.6), w = h * 0.42;
+    const bx = x2 - ux * h, by = y2 - uy * h;
+    line(g, [x1, y1], [bx, by], `stroke: ${color}; stroke-width: ${width}` + (dash ? `; stroke-dasharray: ${dash}` : ""));
+    poly(g, [[x2, y2], [bx - uy * w, by + ux * w], [bx + uy * w, by - ux * w]], `fill: ${color}`);
+  }
+
+  // Text with markup: parts [string, flags], flags (space-separated) from it, b (bold), ul (underline),
+  // sub, sup. A subscript right after a superscript is stacked under it (z*_conv). Back on the baseline
+  // after a script, a small gap keeps the script clear of the next character.
+  const SCRIPT_GAP = 0.12;
+  function txt(parent, x, y, parts, attrs = {}) {
+    const { "font-size": fsz, style, ...rest } = attrs;
+    const t = el("text", { x: f2(x), y: f2(y), ...rest, style: [fsz && `font-size: ${fsz}px`, style].filter(Boolean).join("; ") || null }, parent);
+    const fs = +fsz || (String(rest.class || "").split(" ").includes("small") ? 13 : 16);
+    let shift = 0, supW = 0;
+    for (const [s, fl = ""] of parts) {
+      const f = fl.split(" ");
+      const want = f.includes("sub") ? 0.3 * fs : f.includes("sup") ? -0.42 * fs : 0;
+      const ts = el("tspan", { dy: f2(want - shift) }, t);
+      if (shift < 0 && want > 0) ts.setAttribute("dx", f2(-supW));
+      else if (shift !== 0 && want === 0) ts.setAttribute("dx", f2(SCRIPT_GAP * fs));
+      const cls = [f.includes("it") && "it", f.includes("b") && "bf", f.includes("ul") && "ul"].filter(Boolean).join(" ");
+      if (cls) ts.setAttribute("class", cls);
+      if (want) ts.setAttribute("font-size", f2(0.72 * fs));
+      ts.textContent = s;
+      if (want < 0) {
+        let w = 0;
+        try { w = ts.getComputedTextLength(); } catch (e) { /* not laid out */ }
+        supW = w || s.length * 0.4 * fs;
+      }
+      shift = want;
+    }
+    return t;
+  }
+  // Label parts (SVG) for the symbols of the notes
+  const S = {
+    zb: [["z\u0304", "it"], ["conv", "sub"]],
+    zl: [["z", "it ul"], ["conv", "sub"]],
+    zc: [["z", "it"], ["*", "sup"], ["conv", "sub"]],
+    zs: [["z", "it"], ["*", "sup"]],
+    ub: [["u\u0304", "b"]],
+    uv: [["(", ""], ["u\u0304", "b"], [", ", ""], ["v\u0304", "it"], [")", ""]],
+    xb: [["x\u0304", "b"]],
+    cbq: q => [["c\u0304", "it"], [q, "sub"]],
+    xq: q => [["x", "b"], [q, "sup"]],
+  };
+  H.xb = OB(B("x"));
+  const xH = q => H.x + SUP(qName(q));
+  // "Ax ≥ b" (or the common relation), or "(8.3b)" when the rows have mixed relations
+  const sysH = (x = H.x) => new Set(inst.rel).size === 1 ? `${H.A}${x} ${REL[inst.rel[0]]} ${H.b}` : "(8.3b)";
+  const minusH = v => v < -1e-12 ? `+ ${numH(-v)}` : `− ${numH(v)}`;
+
+  // A plot box [L, Tp, R, Bt] (px) showing [x0, x1] × [y0, y1], with the layers base (grid), plot (clipped
+  // to the box) and top.
+  function frame(svg, [x0, x1], [y0, y1], [L, Tp, R, Bt]) {
+    svg.replaceChildren();
+    const kx = (R - L) / (x1 - x0), ky = (Bt - Tp) / (y1 - y0);
+    const X = x => L + (x - x0) * kx, Y = y => Bt - (y - y0) * ky;
+    const id = svg.id + "Clip";
+    el("rect", { x: L, y: Tp, width: R - L, height: Bt - Tp }, el("clipPath", { id }, el("defs", {}, svg)));
+    return {
+      svg, x0, x1, y0, y1, L, Tp, R, Bt, kx, ky, X, Y, P: p => [X(p[0]), Y(p[1])],
+      rect: [[x0, y0], [x1, y0], [x1, y1], [x0, y1]],
+      inY: y => y >= y0 && y <= y1,
+      base: el("g", {}, svg), plot: el("g", { "clip-path": `url(#${id})` }, svg), top: el("g", {}, svg),
+    };
+  }
+  const niceStep = span => {
+    const raw = span / 5, p = 10 ** Math.floor(Math.log10(raw)), m = raw / p;
+    return (m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10) * p;
+  };
+  const tickStr = v => String(+v.toFixed(6)).replace("-", "−");
+  const ticks = (lo, hi, st) => {
+    const out = [];
+    for (let i = Math.ceil(lo / st - 1e-9); i * st <= hi + 1e-9 * st; i++) out.push(i * st);
+    return out;
+  };
+  function grid(F, sx, sy, xlab, ylab) {
+    const g = F.base;
+    for (const v of ticks(F.x0, F.x1, sx)) {
+      line(g, [F.X(v), F.Tp], [F.X(v), F.Bt], "stroke: var(--grid)");
+      txt(g, F.X(v), F.Bt + 16, [[tickStr(v)]], { class: "small", "text-anchor": "middle" });
+    }
+    for (const v of ticks(F.y0, F.y1, sy)) {
+      line(g, [F.L, F.Y(v)], [F.R, F.Y(v)], "stroke: var(--grid)");
+      txt(g, F.L - 6, F.Y(v) + 4, [[tickStr(v)]], { class: "small", "text-anchor": "end" });
+    }
+    if (F.x0 < 0 && F.x1 > 0) line(g, [F.X(0), F.Tp], [F.X(0), F.Bt], "stroke: var(--axis)");
+    if (F.y0 < 0 && F.y1 > 0) line(g, [F.L, F.Y(0)], [F.R, F.Y(0)], "stroke: var(--axis)");
+    el("rect", { x: F.L, y: F.Tp, width: F.R - F.L, height: F.Bt - F.Tp, fill: "none", style: "stroke: var(--axis)" }, g);
+    if (xlab) txt(g, F.R, F.Bt + 33, xlab, { "text-anchor": "end" });
+    if (ylab) txt(g, F.L, F.Tp - 10, ylab, { "text-anchor": "start" });
+  }
+  // The part inside the frame of the line a^T p = beta (data coordinates), ordered left to right, or null.
+  function lineSeg(F, [ax, ay], beta) {
+    const P = [];
+    if (Math.abs(ay) > 1e-14) for (const x of [F.x0, F.x1]) { const y = (beta - ax * x) / ay; if (y >= F.y0 - 1e-9 && y <= F.y1 + 1e-9) P.push([x, y]); }
+    if (Math.abs(ax) > 1e-14) for (const y of [F.y0, F.y1]) { const x = (beta - ay * y) / ax; if (x >= F.x0 - 1e-9 && x <= F.x1 + 1e-9) P.push([x, y]); }
+    let best = null, bd = 1e-12;
+    for (let i = 0; i < P.length; i++) for (let j = i + 1; j < P.length; j++) {
+      const d = Math.hypot(P[i][0] - P[j][0], P[i][1] - P[j][1]);
+      if (d > bd) { bd = d; best = [P[i], P[j]]; }
+    }
+    return best && best.sort((p, q) => p[0] - q[0] || p[1] - q[1]);
+  }
+  // The lower envelope of the lines u -> c + s u on [lo, hi], as its breakpoints.
+  function envelope(Ls, lo, hi) {
+    const val = (l, u) => l.c + l.s * u;
+    let cur = Ls.reduce((p, l) => (val(l, lo) < val(p, lo) - 1e-12 || (Math.abs(val(l, lo) - val(p, lo)) <= 1e-12 && l.s < p.s) ? l : p));
+    let u = lo;
+    const out = [[lo, val(cur, lo)]];
+    for (let it = 0; it < 1000; it++) {
+      let best = null, bu = hi;
+      for (const l of Ls) {
+        if (l.s >= cur.s - 1e-12) continue;
+        const x = (l.c - cur.c) / (cur.s - l.s);
+        if (x > u + 1e-12 && (x < bu - 1e-12 || (Math.abs(x - bu) <= 1e-12 && best && l.s < best.s))) { bu = x; best = l; }
+      }
+      if (!best) break;
+      out.push([bu, val(cur, bu)]);
+      cur = best; u = bu;
+    }
+    out.push([hi, val(cur, hi)]);
+    return out;
+  }
+  // Legend swatches (HTML)
+  const SWH = inner => `<svg viewBox="0 0 22 14" aria-hidden="true">${inner}</svg>`;
+  const SW = {
+    area: (c, dash) => SWH(`<rect x="1.5" y="2" width="19" height="10" style="fill: ${c}; fill-opacity: 0.4; stroke: ${c}${dash ? "; stroke-dasharray: 3 2" : ""}"/>`),
+    line: (c, dash, w = 2.5, op = 1) => SWH(`<line x1="1" y1="7" x2="21" y2="7" style="stroke: ${c}; stroke-width: ${w}; stroke-opacity: ${op}${dash ? "; stroke-dasharray: " + dash : ""}"/>`),
+    dot: (c, hollow) => SWH(`<circle cx="11" cy="7" r="4.5" style="fill: ${hollow ? "var(--bg)" : c}; stroke: ${hollow ? "var(--fg)" : c}; stroke-width: 1.5"/>`),
+    ring: (c, dash) => SWH(`<circle cx="11" cy="7" r="5.5" style="fill: none; stroke: ${c}; stroke-width: 1.8${dash ? "; stroke-dasharray: 3 2" : ""}"/>`),
+    diamond: c => SWH(`<polygon points="11,0.5 17.5,7 11,13.5 4.5,7" style="fill: ${c}"/>`),
+    star: () => SWH(`<polygon points="${ptsStr(starPts(11, 7.5, 7))}" style="fill: var(--star); stroke: var(--star-edge); stroke-width: 1"/>`),
+    square: c => SWH(`<rect x="6.5" y="2.5" width="9" height="9" style="fill: ${c}"/>`),
+    outline: () => SWH(`<rect x="1.5" y="2" width="19" height="10" style="fill: none; stroke: var(--fg); stroke-width: 1.4; stroke-dasharray: 3 2"/>`),
+  };
+  const legend = (id, items) => {
+    $(id).innerHTML = items.filter(Boolean).map(([sw, lab]) => `<span class="li">${sw}<span>${lab}</span></span>`).join("");
+  };
+
+  // ---------------------------------------------------------------- state
+  let inst = null, exIndex = 0, customSpec = null, initQ = [], picks = {}, steps = [], si = 0;
+  const opt = { art: false, eps: 0 };
+  let reveal = true, dualView = "h", timer = null, hotQ = null, view = {};
+  const Qset = Qb => `{${Qb.map(qName).join(", ")}}`;
+  const pct = v => (100 * v).toFixed(v < 0.1 ? 2 : 1).replace("-", "−") + " %";
+  const zcVal = () => (reveal && inst.mp ? inst.mp.z : null);
+  const zsVal = () => (reveal && Number.isFinite(inst.zStar) ? inst.zStar : null);
+  const eqn = (html, tag) => `<div class="eqn">${html}${tag ? ` <span class="tag">${tag}</span>` : ""}</div>`;
+  const reducedOf = (s, q) => col(q).c - dot(s.u, col(q).a) - s.v;
+
+  // ---------------------------------------------------------------- the BLP, the chain of models, the status
+  function xSetH() {
+    const n = inst.n, N = inst.cols.length, parts = [];
+    if (inst.hasD) parts.push(inst.D.length ? `{${H.x} ∈ ${H.Bn(n)} : ${inst.D.map((r, i) => `${termsH(r)} ${REL[inst.drel[i]]} ${numH(inst.d[i])}`).join(", ")}}` : H.Bn(n));
+    if (N <= 6 && n <= 4) parts.push(`{${inst.cols.map(k => vecH(k.x) + T).join(", ")}}`);
+    const names = N <= 4 ? `{${inst.cols.map(k => xH(k.q)).join(", ")}}` : `{${xH(0)}, …, ${xH(N - 1)}}`;
+    return parts.length ? `${parts.join(" = ")} =: ${names}` : names;
+  }
+  function renderBLP() {
+    const title = exIndex === "custom" ? "Custom instance" : EXAMPLES[exIndex].title, rows = [];
+    if (inst.graph) {
+      const ij = I("ij"), sum = `∑${SUB(`(${I("i")}, ${I("j")})∈𝒜`)}`;
+      rows.push([`${H.zs} = min`, `${sum} ${I("c")}${SUB(ij)}${I("x")}${SUB(ij)}`, "(8.6a)"]);
+      rows.push(["s.t.", `${sum} ${I("r")}${SUB(ij)}${I("x")}${SUB(ij)} ≤ ${I("R")} = ${inst.graph.R}`, "(8.6c)"]);
+      rows.push(["", `${H.x} ∈ ${H.X} = {(${I("s")}, ${I("t")})-paths in the graph}, |${H.Q}| = ${inst.cols.length}`, "(8.6b, d), (8.7)"]);
+    } else {
+      rows.push([`${H.zs} = min`, `${H.c}${T}${H.x} = ${termsH(inst.c)}`, "(8.3a)"]);
+      inst.A.forEach((a, i) => rows.push([i ? "" : "s.t.", `${termsH(a)} ${REL[inst.rel[i]]} ${numH(inst.b[i])}`, i ? "" : "(8.3b)"]));
+      rows.push(["", `${H.x} ∈ ${H.X} = ${xSetH()}`, "(8.3c)"]);
+    }
+    $("blp").innerHTML = `<div class="bt">${title}</div><table>` +
+      rows.map(([l, m, r]) => `<tr><td class="l">${l}</td><td class="wrapok">${m}</td><td class="r">${r}</td></tr>`).join("") + "</table>";
+  }
+  function renderStatus(s) {
+    const M = numH(inst.art.c), lamA = `${OB(I("λ"))}${SUB("a")}`;
+    let h = "";
+    if (s.kind === "init") {
+      h = `Initial ${H.Qb} = ${Qset(s.Qb)}`;
+      if (s.artAuto) h += ` is infeasible for ${sysH()}: artificial column a (cost ${I("M")} = ${M}) added`;
+      else if (s.Qb.includes(ART)) h += ` with artificial column a (cost ${I("M")} = ${M})`;
+      h += `. Click columns to change it.`;
+    } else if (s.kind === "rmp") {
+      h = `Iteration ${s.k}, DW-RMP: ${H.zb} = ${numH(s.z)}, ${H.uv} = (${inst.m > 1 ? vecH(s.u) : numH(s.u[0])}, ${numH(s.v)})`;
+      if (!s.xbar) h += `, ${lamA} = ${numH(s.artLam)}`;
+      h += ".";
+    } else if (s.kind === "price") {
+      const cb = `${H.cbqb} = ${numH(s.cbar)}`;
+      if (s.optimal) h = `Pricing: ${cb} ≥ 0 ⇒ optimal, ${H.zb} = ${H.zc} = ${numH(s.z)}.`;
+      else if (s.gapStop) h = `Pricing: gap ${pct(s.gap)} ≤ ${pct(opt.eps)} ⇒ stop.`;
+      else {
+        h = `Pricing: ${cb} &lt; 0 ⇒ add column ${qName(s.qbar)}${s.picked ? " (your choice)" : ""}. ${H.zl} = ${numH(s.lower)}.`;
+        if (s.gap <= 1e-12) h += " Gap 0, but not yet dual optimal (degeneracy).";
+        if (s.red.filter(v => v < -1e-9).length > 1) h += " Click another red column to pick it.";
+      }
+    } else if (s.artLam > 1e-9 && s.optimal) {
+      h = `${lamA} = ${numH(s.artLam)} &gt; 0 at the optimum ⇒ the DW-MP and the BLP are infeasible.`;
+    } else if (s.qI === null) {
+      h = `DW-IRMP (9.16): no generated column satisfies ${sysH()} ⇒ ${H.zI} = ∞.`;
+    } else {
+      h = `DW-IRMP (9.16), ${H.lq} ∈ {0, 1}: ${H.zI} = ${numH(s.zI)} at ${xH(s.qI)}`;
+      if (reveal && Number.isFinite(inst.zStar)) h += s.zI <= inst.zStar + 1e-9 ? ` = ${H.zs} (optimal).`
+        : ` &gt; ${H.zs} = ${numH(inst.zStar)}: ${xH(inst.qStar)} was never generated (branch-and-price, §9.6).`;
+      else h += ".";
+    }
+    $("status").innerHTML = h;
+  }
+
+  // ---------------------------------------------------------------- x-space (n = 2)
+  const redVec = s => inst.c.map((cj, j) => cj - inst.A.reduce((t, a, i) => t + a[j] * s.u[i], 0));   // c − A^T ū
+  function rowParts(a, r, b) {
+    const P = [];
+    a.forEach((v, j) => {
+      if (Math.abs(v) < 1e-12) return;
+      const sg = v < 0 ? "−" : "+", mag = Math.abs(Math.abs(v) - 1) < 1e-12 ? "" : numStr(Math.abs(v));
+      P.push([(P.length ? ` ${sg} ` : v < 0 ? "−" : "") + mag], ["x", "it"], [String(j + 1), "sub"]);
+    });
+    P.push([` ${REL[r]} ${numStr(b)}`]);
+    return P;
+  }
+  function renderPrim(s) {
+    const svg = $("prim"), pts = inst.cols.map(k => k.x), price = s.kind === "price";
+    svg.setAttribute("viewBox", "0 0 720 400");
+    let lo = [0, 0], hi = [1, 1];
+    for (const p of pts) { lo = lo.map((v, j) => Math.min(v, p[j])); hi = hi.map((v, j) => Math.max(v, p[j])); }
+    const pad = 0.3 * Math.max(hi[0] - lo[0], hi[1] - lo[1]);
+    lo = lo.map(v => v - pad); hi = hi.map(v => v + pad);
+    const BH = 336, k = Math.min(638 / (hi[0] - lo[0]), BH / (hi[1] - lo[1]));
+    const W = Math.max((hi[0] - lo[0]) * k, Math.min(638, 1.4 * BH));
+    const ex = (W / k - (hi[0] - lo[0])) / 2, ey = (BH / k - (hi[1] - lo[1])) / 2;
+    const L = 50 + (638 - W) / 2;
+    const F = frame(svg, [lo[0] - ex, hi[0] + ex], [lo[1] - ey, hi[1] + ey], [L, 26, L + W, 26 + BH]);
+    const st = niceStep(Math.max(F.x1 - F.x0, F.y1 - F.y0) * 0.75);
+    grid(F, st, st, [["x", "it"], ["1", "sub"]], [["x", "it"], ["2", "sub"]]);
+    const g = F.plot;
+    // the infeasible side of each row of A x >= b
+    inst.A.forEach((a, i) => {
+      const r = inst.rel[i];
+      if (r === "eq") return;
+      const P = r === "ge" ? clip(F.rect, a, inst.b[i]) : clip(F.rect, a.map(v => -v), -inst.b[i]);
+      if (P.length > 2) poly(g, P.map(F.P), "fill: var(--fg); fill-opacity: 0.06; stroke: none");
+    });
+    if (inst.XLP && inst.D.length && inst.XLP.length > 2)
+      poly(g, inst.XLP.map(F.P), "fill: var(--xlp-fill); stroke: var(--xlp-stroke); stroke-width: 1.4; stroke-dasharray: 5 4");
+    const cv = inst.conv;
+    if (cv.length > 2) poly(g, cv.map(F.P), "fill: var(--feas-fill); fill-opacity: 0.75; stroke: var(--xlp-stroke); stroke-width: 1.2");
+    else if (cv.length === 2) line(g, F.P(cv[0]), F.P(cv[1]), "stroke: var(--feas-fill); stroke-width: 8; stroke-linecap: round");
+    // the rows of A x >= b
+    inst.A.forEach((a, i) => {
+      const seg = lineSeg(F, a, inst.b[i]);
+      if (!seg) return;
+      line(g, F.P(seg[0]), F.P(seg[1]), "stroke: var(--cons); stroke-width: 1.8");
+      const [p, q] = seg.map(F.P), at = t => [p[0] + t * (q[0] - p[0]), p[1] + t * (q[1] - p[1])];
+      // the place along the line farthest from the points (and the optimal ones)
+      const marks = [...pts, ...(inst.xConv ? [inst.xConv] : [])].map(F.P);
+      const t = [0.12, 0.25, 0.4, 0.6, 0.75, 0.88].reduce((bt, t) => {
+        const d = P => Math.min(...marks.map(m => Math.hypot(m[0] - P[0] - 40, m[1] - P[1] + 7)));
+        return d(at(t)) > d(at(bt)) + 1 ? t : bt;
+      }, 0.12);
+      txt(F.top, at(t)[0] + 6, at(t)[1] - 7, rowParts(a, inst.rel[i], inst.b[i]), { "text-anchor": "start", style: "fill: var(--cons)" });
+    });
+    // conv{x^q : q in Q̄}
+    const inQ = s.Qb.filter(q => q !== ART), hq = hull(inQ.map(q => inst.cols[q].x));
+    if (hq.length > 2) poly(g, hq.map(F.P), "fill: var(--rmp); fill-opacity: 0.16; stroke: var(--rmp); stroke-width: 2; stroke-linejoin: round");
+    else if (hq.length === 2) line(g, F.P(hq[0]), F.P(hq[1]), "stroke: var(--rmp); stroke-width: 2.5");
+    if (s.kind !== "init" && s.xbar) {
+      const seg = lineSeg(F, inst.c, s.z);
+      if (seg) line(g, F.P(seg[0]), F.P(seg[1]), "stroke: var(--c); stroke-width: 1.6; stroke-dasharray: 7 5");
+    }
+    const red = price ? redVec(s) : null;
+    if (price) {
+      const seg = lineSeg(F, red, s.pv[s.qmin]);
+      if (seg) line(g, F.P(seg[0]), F.P(seg[1]), "stroke: var(--pr); stroke-width: 1.8; stroke-dasharray: 3 4");
+    }
+    // optimal points (known by enumeration)
+    if (reveal && inst.qStar !== null) star(F.top, F.P(inst.cols[inst.qStar].x), 12);
+    if (reveal && inst.xConv) circ(F.top, F.P(inst.xConv), 12, "fill: none; stroke: var(--fg); stroke-width: 1.6; stroke-dasharray: 3 2.5");
+    // the columns
+    const cen = pts.reduce((a, p) => [a[0] + p[0] / pts.length, a[1] + p[1] / pts.length], [0, 0]);
+    inst.cols.forEach(kq => {
+      const q = kq.q, P = F.P(kq.x), inside = s.Qb.includes(q);
+      const gq = el("g", { class: "dq", "data-q": q }, F.top);
+      if (price && q === s.qbar) circ(gq, P, 11.5, "fill: none; stroke: var(--pr); stroke-width: 2.4");
+      circ(gq, P, 6.5, inside ? `fill: ${qColor(q)}; stroke: var(--fg); stroke-width: 1` : `fill: var(--bg); stroke: ${qColor(q)}; stroke-width: 2`);
+      circ(gq, P, 13, null, { class: "hitc" });
+      let dx = P[0] - F.X(cen[0]), dy = P[1] - F.Y(cen[1]);
+      const d = Math.hypot(dx, dy);
+      if (d < 1) { dx = -1; dy = -1; } else { dx /= d; dy /= d; }
+      if (Math.abs(dx) < 0.3) dx = 0.3 * Math.sign(dx || 1);
+      txt(gq, P[0] + 19 * dx, P[1] + 19 * dy + 5, S.xq(qName(q)), { "text-anchor": "middle" });
+    });
+    if (price && red.some(v => Math.abs(v) > 1e-9)) {
+      const P = F.P(inst.cols[s.qmin].x), Lr = Math.hypot(red[0] * F.kx, red[1] * F.ky);
+      arrowPx(F.top, P, [P[0] - (red[0] * F.kx / Lr) * 46, P[1] + (red[1] * F.ky / Lr) * 46], "var(--pr)", { width: 2 });
+    }
+    if (s.kind !== "init" && s.xbar) diamond(F.top, F.P(s.xbar), 7.5, "fill: var(--rmp); stroke: var(--fg); stroke-width: 1");
+    $("primHead").innerHTML = `${H.X} and ${H.Xconv} = conv ${H.X} <span class="eqref">(8.11)</span>`;
+    legend("primLeg", [
+      [SW.area("var(--feas-fill)"), `${H.Xconv}`],
+      inst.XLP && inst.D.length && [SW.area("var(--xlp-fill)", 1), `{${H.x} ∈ [0, 1]${SUP(2)} : ${H.D}${H.x} ≥ ${H.d}}`],
+      [SW.line("var(--cons)"), `${H.A}${H.x} ≥ ${H.b}`],
+      [SW.area("var(--rmp)"), `conv{${H.xq} : ${I("q")} ∈ ${H.Qb}}`],
+      [SW.dot("var(--v1)"), `${H.xq}, ${I("q")} ∈ ${H.Qb}`],
+      [SW.dot("var(--v1)", 1), `not generated`],
+      s.kind !== "init" && s.xbar && [SW.diamond("var(--rmp)"), `${H.xb}`],
+      s.kind !== "init" && s.xbar && [SW.line("var(--c)", "5 3", 1.8), `${H.c}${T}${H.x} = ${H.zb}`],
+      price && [SW.line("var(--pr)", "3 3", 2), `pricing (9.9)`],
+      reveal && inst.qStar !== null && [SW.star(), `${H.x}${SUP("*")}`],
+      reveal && inst.xConv && [SW.ring("var(--fg)", 1), `${H.x}${SS("*", "conv")}`],
+    ]);
+  }
+
+  // ---------------------------------------------------------------- the graph (path example)
+  function renderNet(s) {
+    const svg = $("prim"), G = inst.graph, price = s.kind === "price";
+    svg.setAttribute("viewBox", "0 0 720 330");
+    svg.replaceChildren();
+    const NP = k => [70 + G.nodes[k][0] * 145, 280 - G.nodes[k][1] * 115], R0 = 16;
+    const pathPx = q => inst.pathNodes[q].map(NP);
+    if (reveal && inst.qStar !== null)
+      polyline(svg, pathPx(inst.qStar), "fill: none; stroke: var(--star); stroke-width: 16; stroke-opacity: 0.55; stroke-linejoin: round; stroke-linecap: round");
+    inst.cols.forEach(kq => polyline(svg, pathPx(kq.q), `fill: none; stroke: ${qColor(kq.q)}; stroke-width: 10; stroke-linejoin: round; stroke-linecap: round`, { class: "ov", "data-q": kq.q }));
+    if (s.kind !== "init" && s.xbar) G.arcs.forEach((a, j) => {
+      if (s.xbar[j] > 1e-9) line(svg, NP(a[0]), NP(a[1]), `stroke: var(--rmp); stroke-opacity: 0.45; stroke-width: ${f2(3 + 8 * s.xbar[j])}; stroke-linecap: round`);
+    });
+    G.arcs.forEach(a => {
+      const p = NP(a[0]), q = NP(a[1]), L = Math.hypot(q[0] - p[0], q[1] - p[1]), ux = (q[0] - p[0]) / L, uy = (q[1] - p[1]) / L;
+      arrowPx(svg, [p[0] + ux * R0, p[1] + uy * R0], [q[0] - ux * (R0 + 1), q[1] - uy * (R0 + 1)], "var(--cons)", { width: 1.5, head: 9 });
+    });
+    if (price) polyline(svg, pathPx(s.qbar), "fill: none; stroke: var(--pr); stroke-width: 3; stroke-dasharray: 7 5; stroke-linejoin: round");
+    G.arcs.forEach((a, j) => {
+      const p = NP(a[0]), q = NP(a[1]), m = [(p[0] + q[0]) / 2 + a[4][0], (p[1] + q[1]) / 2 + a[4][1]];
+      if (price) txt(svg, m[0], m[1], [[numStr(a[2] - s.u[0] * a[3])]], { "text-anchor": "middle", style: "fill: var(--pr); font-weight: bold" });
+      else txt(svg, m[0], m[1], [[`${a[2]}, ${a[3]}`]], { "text-anchor": "middle", "font-size": 14 });
+    });
+    for (const k of Object.keys(G.nodes).map(Number)) {
+      const P = NP(k);
+      circ(svg, P, R0, "fill: var(--bg); stroke: var(--fg); stroke-width: 1.5");
+      txt(svg, P[0], P[1] + 5, [[String(k)]], { "text-anchor": "middle" });
+      if (k === G.s) txt(svg, P[0] - 24, P[1] + 5, [["s", "it"]], { "text-anchor": "end" });
+      if (k === G.t) txt(svg, P[0] + 24, P[1] + 5, [["t", "it"]], { "text-anchor": "start" });
+    }
+    $("primHead").innerHTML = `Columns: (${I("s")}, ${I("t")})-paths <span class="eqref">(Example 2.1)</span>`;
+    legend("primLeg", [
+      !price && [SW.line("var(--cons)", null, 1.5), `${I("c")}${SUB(I("ij"))}, ${I("r")}${SUB(I("ij"))}`],
+      price && [SW.line("var(--pr)", "4 3", 2.5), `${H.xqb}; labels ${I("c")}${SUB(I("ij"))} − ${OB(I("u"))}${I("r")}${SUB(I("ij"))}`],
+      s.kind !== "init" && s.xbar && [SW.line("var(--rmp)", null, 7, 0.45), `${H.xb}`],
+      reveal && inst.qStar !== null && [SW.line("var(--star)", null, 9, 0.55), `${H.x}${SUP("*")}`],
+    ]);
+  }
+
+  // ---------------------------------------------------------------- column space (m = 1)
+  // Values over the whole run, so that the plot ranges stay put while stepping
+  const runVals = key => steps.filter(t => t.kind === "price").map(t => t[key]);
+  const usesArt = () => steps.length && steps[0].Qb.includes(ART);
+  function padRange(lo, hi, f = 0.08, min = 1) {
+    let d = hi - lo;
+    if (d < 1e-9) { d = Math.max(min, Math.abs(hi) * 0.3); lo -= d / 2; hi += d / 2; }
+    return [lo - f * d, hi + f * d];
+  }
+  function renderCols(s) {
+    const svg = $("colfig"), b = inst.b[0], r = inst.rel[0], price = s.kind === "price", solved = s.kind !== "init";
+    const art = usesArt(), ks = art ? [...inst.cols, inst.art] : inst.cols;
+    const as = ks.map(k => k.a[0]), cs = ks.map(k => k.c);
+    const cmin = Math.min(...cs), cmax = Math.max(...cs), spread = Math.max(1, cmax - cmin);
+    const lows = runVals("lower").filter(v => v >= cmin - spread);
+    const xr = padRange(Math.min(...as, b), Math.max(...as, b));
+    const yr = padRange(Math.min(cmin, ...lows), cmax, 0.1);
+    const F = frame(svg, xr, yr, [64, 24, 690, 290]);
+    grid(F, niceStep(xr[1] - xr[0]), niceStep(yr[1] - yr[0]),
+      [["A", "it"], ["x", "b"], ["q", "sup it"]], [["c", "b"], ["⊤", "sup"], ["x", "b"], ["q", "sup it"]]);
+    const g = F.plot;
+    if (r !== "eq") {
+      const [u0, u1] = r === "ge" ? [F.x0, b] : [b, F.x1];
+      poly(g, [[u0, F.y0], [u1, F.y0], [u1, F.y1], [u0, F.y1]].map(F.P), "fill: var(--fg); fill-opacity: 0.06; stroke: none");
+    }
+    line(g, [F.X(b), F.Tp], [F.X(b), F.Bt], "stroke: var(--cons); stroke-width: 1.8");
+    txt(F.top, F.X(b) + 5, F.Tp + 16, [["b", "b"], [` = ${numStr(b)}`]], { "text-anchor": "start", style: "fill: var(--cons)" });
+    const pt = k => F.P([k.a[0], k.c]);
+    if (reveal) {
+      const hAll = hull(inst.cols.map(k => [k.a[0], k.c]));
+      if (hAll.length > 1) poly(g, hAll.map(F.P), "fill: none; stroke: var(--fg); stroke-opacity: 0.55; stroke-width: 1.2; stroke-dasharray: 5 4");
+    }
+    const hq = hull(s.Qb.map(q => [col(q).a[0], col(q).c]));
+    if (hq.length > 2) poly(g, hq.map(F.P), "fill: var(--rmp); fill-opacity: 0.16; stroke: var(--rmp); stroke-width: 2; stroke-linejoin: round");
+    else if (hq.length === 2) line(g, F.P(hq[0]), F.P(hq[1]), "stroke: var(--rmp); stroke-width: 2.5");
+    const dualY = a => s.v + s.u[0] * a;
+    if (solved) {
+      line(g, F.P([F.x0, dualY(F.x0)]), F.P([F.x1, dualY(F.x1)]), "stroke: var(--ub); stroke-width: 2");
+      inst.cols.forEach(k => line(g, F.P([k.a[0], dualY(k.a[0])]), pt(k), `stroke: ${qColor(k.q)}; stroke-width: 4`, { class: "ov", "data-q": k.q }));
+    }
+    if (price) {
+      const v2 = s.pv[s.qmin];
+      line(g, F.P([F.x0, v2 + s.u[0] * F.x0]), F.P([F.x1, v2 + s.u[0] * F.x1]), "stroke: var(--lb); stroke-width: 1.8; stroke-dasharray: 6 4");
+      const k = inst.cols[s.qbar];
+      if (Math.abs(s.cbar) > 1e-9) arrowPx(F.top, F.P([k.a[0], dualY(k.a[0])]), pt(k), "var(--pr)", { width: 2.4, head: 9 });
+    }
+    if (reveal && inst.qStar !== null) star(F.top, pt(inst.cols[inst.qStar]), 12);
+    if (reveal && inst.mp) {
+      const aConv = inst.mp.lam.reduce((t, l, i) => t + l * inst.cols[i].a[0], 0);
+      circ(F.top, F.P([aConv, inst.mp.z]), 11, "fill: none; stroke: var(--fg); stroke-width: 1.6; stroke-dasharray: 3 2.5");
+    }
+    inst.cols.forEach(k => {
+      const P = pt(k), inside = s.Qb.includes(k.q), gq = el("g", { class: "dq", "data-q": k.q }, F.top);
+      if (price && k.q === s.qbar) circ(gq, P, 10.5, "fill: none; stroke: var(--pr); stroke-width: 2.2");
+      circ(gq, P, 5.5, inside ? `fill: ${qColor(k.q)}; stroke: var(--fg); stroke-width: 1` : `fill: var(--bg); stroke: ${qColor(k.q)}; stroke-width: 2`);
+      circ(gq, P, 11, null, { class: "hitc" });
+      if (inst.cols.length <= 40) txt(gq, P[0] + 7, P[1] - 7, [[qName(k.q)]], { class: "small", "text-anchor": "start" });
+    });
+    if (s.Qb.includes(ART)) {
+      const P = pt(inst.art);
+      el("rect", { x: f2(P[0] - 5.5), y: f2(P[1] - 5.5), width: 11, height: 11, style: "fill: var(--muted)" }, F.top);
+      txt(F.top, P[0] + 9, P[1] - 7, [["a"]], { class: "small", "text-anchor": "start" });
+    }
+    if (solved) {
+      const aR = s.Qb.reduce((t, q, i) => t + s.lam[i] * col(q).a[0], 0);
+      diamond(F.top, F.P([aR, s.z]), 7.5, "fill: var(--rmp); stroke: var(--fg); stroke-width: 1");
+      circ(F.top, F.P([b, s.z]), 5, "fill: var(--ub); stroke: var(--bg); stroke-width: 1.5");
+      txt(F.top, F.X(b) - 8, F.Y(s.z) - 8, S.zb, { "text-anchor": "end", style: "fill: var(--ub)" });
+    }
+    if (price) {
+      circ(F.top, F.P([b, s.lower]), 5, "fill: var(--lb); stroke: var(--bg); stroke-width: 1.5");
+      txt(F.top, F.X(b) - 8, F.Y(s.lower) + 18, S.zl, { "text-anchor": "end", style: "fill: var(--lb)" });
+    }
+    const leg = [
+      [SW.area("var(--rmp)"), `conv ${H.Qb}`],
+      solved && [SW.diamond("var(--rmp)"), `DW-RMP solution`],
+      solved && [SW.line("var(--ub)"), `dual line ${I("y")} = ${H.vb} + ${H.ub}${I("a")}`],
+      price && [SW.line("var(--lb)", "5 3", 2), `shifted to ${H.x}${SUP(I("q") + SUB("min"))}`],
+      price && [SW.line("var(--pr)", null, 2.4), `${H.cbqb}`],
+      reveal && [SW.line("var(--fg)", "4 3", 1.3, 0.6), `conv ${H.Q}`],
+      reveal && inst.qStar !== null && [SW.star(), `${H.zs}`],
+      reveal && inst.mp && [SW.ring("var(--fg)", 1), `${H.zc}`],
+    ];
+    $("colCap").innerHTML = `<div class="legend">${leg.filter(Boolean).map(([sw, lab]) => `<span class="li">${sw}<span>${lab}</span></span>`).join("")}</div>`;
+  }
+
+  // ---------------------------------------------------------------- the dual (m = 1): h(u) and (9.7)
+  function renderDual(s) {
+    const svg = $("dualfig"), b = inst.b[0], r = inst.rel[0], price = s.kind === "price", solved = s.kind !== "init";
+    const us = runVals("u").map(u => Math.abs(u[0]));
+    const U = Math.max(1, ...us, inst.mp ? Math.abs(inst.mp.u[0]) : 0), W = 1.35 * U;
+    const ur = r === "ge" ? [-0.12 * W, W] : r === "le" ? [-W, 0.12 * W] : [-W, W];
+    const dom = r === "ge" ? [0, ur[1]] : r === "le" ? [ur[0], 0] : ur;
+    const zs = runVals("z"), lows = runVals("lower"), mpz = inst.mp ? [inst.mp.z] : [];
+    const ks = usesArt() ? [...inst.cols, inst.art] : inst.cols;
+    const hv = dualView === "h";
+    let yr;
+    if (hv) {
+      const top = Math.max(...zs, ...mpz), base = Math.min(...zs, ...mpz);
+      const loV = Math.max(Math.min(...lows, base), base - 1.5 * Math.max(1, top - base)), spr = Math.max(1, top - loV);
+      yr = [loV - 0.25 * spr, top + 0.25 * spr];
+    } else {
+      const vs = [...runVals("v"), ...(inst.mp ? [inst.mp.v] : [])], hi = Math.max(...vs), lo = Math.min(...vs);
+      const spr = Math.max(1, hi - lo, 0.25 * Math.abs(hi));
+      yr = [lo - 0.8 * spr, hi + 0.5 * spr];
+    }
+    if (!steps.some(t => t.kind === "price")) yr = padRange(Math.min(...ks.map(k => k.c)), Math.max(...ks.map(k => k.c)), 0.3);
+    const F = frame(svg, ur, yr, [64, 28, 690, 282]);
+    grid(F, niceStep(ur[1] - ur[0]), niceStep(yr[1] - yr[0]), [["u", "b"]], hv ? [["h", "it"], ["(", ""], ["u", "b"], [")", ""]] : [["v", "it"]]);
+    const g = F.plot;
+    if (r !== "eq") {
+      const [a0, a1] = r === "ge" ? [F.x0, 0] : [0, F.x1];
+      poly(g, [[a0, F.y0], [a1, F.y0], [a1, F.y1], [a0, F.y1]].map(F.P), "fill: var(--fg); fill-opacity: 0.06; stroke: none");
+    }
+    const inQ = q => s.Qb.includes(q);
+    // a column as a line: h view u -> c_q + u (b − a_q) = L(x^q, u); (u, v) view v = c_q − a_q u
+    const ln = k => (hv ? { c: k.c, s: b - k.a[0] } : { c: k.c, s: -k.a[0] });
+    const drawLn = (k, style, cls) => {
+      const l = ln(k), P = [[F.x0, l.c + l.s * F.x0], [F.x1, l.c + l.s * F.x1]].map(F.P);
+      const gq = el("g", { class: cls, "data-q": k.q }, g);
+      line(gq, P[0], P[1], style);
+      line(gq, P[0], P[1], null, { class: "hit", "stroke-width": 10 });
+    };
+    if (reveal) inst.cols.forEach(k => { if (!inQ(k.q)) drawLn(k, `stroke: ${qColor(k.q)}; stroke-width: 1.2; stroke-dasharray: 4 4; stroke-opacity: 0.7`, "dq"); });
+    s.Qb.forEach(q => drawLn(col(q), `stroke: ${qColor(q)}; stroke-width: 1.6`, q === ART ? null : "dq"));
+    const lQ = s.Qb.map(q => ln(col(q))), lAll = inst.cols.map(ln);
+    if (hv) {
+      if (reveal) polyline(g, envelope(lAll, F.x0, F.x1).map(F.P), "fill: none; stroke: var(--fg); stroke-width: 2.2");
+      polyline(g, envelope(lQ, dom[0], dom[1]).map(F.P), "fill: none; stroke: var(--ub); stroke-width: 3; stroke-linejoin: round");
+      if (reveal && Number.isFinite(inst.zStar) && F.inY(inst.zStar)) {
+        line(g, [F.L, F.Y(inst.zStar)], [F.R, F.Y(inst.zStar)], "stroke: var(--fg); stroke-width: 1.2; stroke-dasharray: 1.5 3");
+        txt(F.top, F.R - 6, F.Y(inst.zStar) - 6, S.zs, { "text-anchor": "end" });
+      }
+    } else {
+      const reg = ls => ls.reduce((P, l) => (P.length ? clip(P, [-l.s, 1], l.c) : P), clipRel(F.rect, [1, 0], r === "ge" ? "ge" : r === "le" ? "le" : "ge", r === "eq" ? F.x0 : 0));
+      const RQ = reg(lQ);
+      if (RQ.length > 2) poly(g, RQ.map(F.P), "fill: var(--ub); fill-opacity: 0.1; stroke: none");
+      if (reveal) { const RA = reg(lAll); if (RA.length > 2) poly(g, RA.map(F.P), "fill: none; stroke: var(--fg); stroke-width: 1.6; stroke-dasharray: 6 4"); }
+      if (solved) {
+        line(g, F.P([F.x0, s.z - b * F.x0]), F.P([F.x1, s.z - b * F.x1]), "stroke: var(--c); stroke-width: 1.5; stroke-dasharray: 7 5");
+        const P = F.P([s.u[0], s.v]), Lg = Math.hypot(b * F.kx, F.ky);
+        arrowPx(F.top, P, [P[0] + (b * F.kx / Lg) * 40, P[1] - (F.ky / Lg) * 40], "var(--c)", { width: 2 });
+      }
+    }
+    if (price) {
+      const k = inst.cols[s.qbar];
+      drawLn(k, "stroke: var(--pr); stroke-width: 2.4; stroke-dasharray: 7 4", "dq");
+      if (hv) {
+        line(F.top, F.P([s.u[0], s.z]), F.P([s.u[0], s.lower]), "stroke: var(--muted); stroke-width: 1.4; stroke-dasharray: 2 3");
+        circ(F.top, F.P([s.u[0], s.lower]), 5.5, "fill: var(--lb); stroke: var(--bg); stroke-width: 1.5");
+        txt(F.top, F.X(s.u[0]) + 9, F.Y(s.lower) + 18, [["h", "it"], ["(", ""], ["u\u0304", "b"], [") = ", ""], ...S.zl], { "text-anchor": "start", style: "fill: var(--lb)" });
+      } else if (Math.abs(s.cbar) > 1e-9) {
+        arrowPx(F.top, F.P([s.u[0], s.v]), F.P([s.u[0], s.v + s.cbar]), "var(--pr)", { width: 2.4, head: 9 });
+      }
+    }
+    if (solved) {
+      const P = F.P([s.u[0], hv ? s.z : s.v]);
+      circ(F.top, P, 6, "fill: var(--ub); stroke: var(--bg); stroke-width: 1.5");
+      txt(F.top, P[0] - 9, P[1] - 9, hv ? [["max = ", ""], ...S.zb] : S.uv, { "text-anchor": "end", style: "fill: var(--ub)" });
+    }
+    if (reveal && inst.mp) star(F.top, F.P([inst.mp.u[0], hv ? inst.mp.z : inst.mp.v]), 11);
+    $("dualHead").innerHTML = hv ? `Dual function ${I("h")}(${H.u}) <span class="eqref">(9.13)</span>`
+      : `Dual <span class="eqref">(9.7)</span> in (${H.u}, ${H.v})`;
+    $("dualHelp").innerHTML = hv
+      ? `Each column is a line ${I("L")}(${H.xq}, ${H.u}); ${I("h")} is their lower envelope. The columns in ${H.Qb} give an upper model of ${I("h")}, maximal (${H.zb}) at ${H.ub}; pricing adds the line attaining ${I("h")}(${H.ub}) = ${H.zl}.`
+      : `Each column ${I("q")} ∈ ${H.Qb} is a constraint of (9.7); ${H.cbq} &lt; 0 means that (${H.ub}, ${H.vb}) violates the one of column ${I("q")}.`;
+    const dn = r === "ge" ? `${H.u} ≥ 0` : r === "le" ? `${H.u} ≤ 0` : `${H.u} free`;
+    const leg = hv ? [
+      [SW.line("var(--v1)", null, 1.6), `${I("L")}(${H.xq}, ${H.u}), ${I("q")} ∈ ${H.Qb}`],
+      [SW.line("var(--ub)", null, 3), `model of ${I("h")}`],
+      price && [SW.line("var(--pr)", "5 3", 2.2), `new column ${H.qb}`],
+      reveal && [SW.line("var(--fg)", null, 2.2), `${I("h")}(${H.u})`],
+      reveal && inst.mp && [SW.star(), `max ${I("h")} = ${H.zc}`],
+    ] : [
+      [SW.area("var(--ub)"), `feasible for ${H.Qb}, ${dn}`],
+      solved && [SW.line("var(--c)", "5 3", 1.5), `${H.b}${T}${H.u} + ${H.v} = ${H.zb}`],
+      price && [SW.line("var(--pr)", "5 3", 2.2), `cut of ${H.qb}`],
+      reveal && [SW.outline(), `all ${I("q")} ∈ ${H.Q}`],
+      reveal && inst.mp && [SW.star(), `(${H.u}${SUP("*")}, ${H.v}${SUP("*")})`],
+    ];
+    $("dualCap").innerHTML = `<div class="legend">${leg.filter(Boolean).map(([sw, lab]) => `<span class="li">${sw}<span>${lab}</span></span>`).join("")}</div>`;
+  }
+
+  // ---------------------------------------------------------------- the DW-RMP (9.5) as a matrix, with its dual (9.7)
+  const qdot = (q, out) => `<span class="qd${out ? " out" : ""}" style="--qc: ${qColor(q)}"></span>`;
+  function renderRMP(s) {
+    const solved = s.kind !== "init", price = s.kind === "price" || s.kind === "irmp";
+    const cand = s.kind === "price" && !s.stop ? s.qbar : null;
+    const Qs = cand === null ? s.Qb : [...s.Qb, cand];
+    const cell = (q, html, cls = "") => {
+      const c = [cls, q === cand && "new", s.kind === "rmp" && q === s.added && "added"].filter(Boolean).join(" ");
+      return `<td data-q="${q}"${c ? ` class="${c}"` : ""}>${html}</td>`;
+    };
+    const row = (cls, head, f, rhs, dual) =>
+      `<tr${cls ? ` class="${cls}"` : ""}><td class="rh">${head}</td>${Qs.map(q => cell(q, f(q))).join("")}<td class="sep">${rhs}</td><td class="dual">${dual}</td></tr>`;
+    const dv = (lab, x) => (solved ? `${lab} = ${numH(x)}` : "");
+    let h = `<table class="mx"><tr><td class="rh">${I("q")}</td>${Qs.map(q => `<th data-q="${q}"${q === cand ? ' class="new"' : ""}>${qdot(q)}${qName(q)}</th>`).join("")}<td class="sep"></td><td class="dual"></td></tr>`;
+    if (inst.n <= 6 || inst.pathNodes) h += row("", H.xq, q => (q === ART ? "—" : xLabel(q)), "", "");
+    h += row("obj", `${H.c}${T}${H.xq}`, q => numH(col(q).c), "→ min", dv(H.zb, s.z));
+    inst.A.forEach((a, i) => {
+      const lab = inst.m > 1 ? `(${H.A}${H.xq})${SUB(i + 1)}` : `${H.A}${H.xq}`;
+      h += row("", lab, q => numH(col(q).a[i]), `${REL[inst.rel[i]]} ${numH(inst.b[i])}`, dv(inst.m > 1 ? OB(I("u")) + SUB(i + 1) : H.ub, solved ? s.u[i] : 0));
+    });
+    h += row("conv", "1", () => "1", "= 1", dv(H.vb, s.v));
+    h += row("", H.lb, q => (!solved || q === cand ? "" : s.lamOf(q) > 1e-9 ? `<span class="pos">${numH(s.lamOf(q))}</span>` : "0"), "", "");
+    if (solved) h += row("", `${H.cbq}`, q => {
+      const v = q === ART ? 0 : reducedOf(s, q);
+      return v < -1e-9 ? `<span class="neg">${numH(v)}</span>` : numH(v);
+    }, "", `<span class="small">(9.8)</span>`);
+    h += "</table>";
+    $("rmp").innerHTML = h;
+  }
+
+  // ---------------------------------------------------------------- pricing (9.9)–(9.10), the bounds (9.14)–(9.15)
+  function renderPricing(s) {
+    const price = s.kind === "price" || s.kind === "irmp";
+    let h = "";
+    if (price) {
+      const pm = s.pv[s.qmin];
+      h += eqn(`min${SUB(`${H.x}∈${H.X}`)} ${H.red}${T}${H.x} = ${numH(pm)} at ${xH(s.qmin)}`, "(9.9)");
+      h += eqn(`${H.cbqb} = ${numH(s.pv[s.qbar])} ${minusH(s.v)} = ${numH(s.cbar)} ${s.optimal ? "≥" : "&lt;"} 0`, "(9.10)");
+      h += eqn(`${H.zl} = ${H.b}${T}${H.ub} ${pm < -1e-12 ? minusH(-pm) : `+ ${numH(pm)}`} = ${numH(s.lower)}`, "(9.14)");
+    }
+    // all columns
+    const N = inst.cols.length;
+    let list = inst.cols.map(k => k.q);
+    if (N > 60) list = (price ? [...list].sort((p, q) => s.red[p] - s.red[q]) : list).slice(0, 60);
+    const canPick = q => s.kind === "init" || (s.kind === "price" && !s.stop && s.red[q] < -1e-9);
+    let t = `<div class="tw"><table class="mx all"><tr><th>${I("q")}</th><th>${H.xq}</th><th>${H.c}${T}${H.xq}</th><th>${H.A}${H.xq}</th>` +
+      (price ? `<th>${H.red}${T}${H.xq}</th><th>${H.cbq}</th>` : "") + `<th>${sysH(H.xq)}</th><th></th></tr>`;
+    for (const q of list) {
+      const k = inst.cols[q], inQ = s.Qb.includes(q), isBar = s.kind === "price" && q === s.qbar && !s.optimal;
+      const cls = [canPick(q) && "pick", isBar && "qbar"].filter(Boolean).join(" ");
+      const st = isBar ? "enters" : inQ ? `∈ ${H.Qb}` : "";
+      t += `<tr data-q="${q}"${cls ? ` class="${cls}"` : ""}${canPick(q) ? ' tabindex="0"' : ""}><td>${qdot(q, !inQ)}${qName(q)}</td><td>${xLabel(q)}</td><td>${numH(k.c)}</td>` +
+        `<td>${inst.m > 1 ? vecH(k.a) : numH(k.a[0])}</td>` +
+        (price ? `<td>${numH(s.pv[q])}</td><td>${s.red[q] < -1e-9 ? `<span class="neg">${numH(s.red[q])}</span>` : numH(s.red[q])}</td>` : "") +
+        `<td>${k.feas ? '<span class="ok">✓</span>' : '<span class="bad">✗</span>'}</td><td>${st}</td></tr>`;
+    }
+    t += "</table></div>";
+    if (N > 60) t += `<div class="more">Showing 60 of ${N} columns${price ? `, by ${H.cbq}` : ""}.</div>`;
+    $("pricing").innerHTML = h + t;
+  }
+
+  function renderBounds(s) {
+    const svg = $("bounds"), P = steps.filter(t => t.kind === "price"), K = P.length;
+    const zb = P.map(t => t.z), lw = P.map(t => t.lower);
+    const zc = zcVal(), zst = zsVal();
+    const hiY = Math.max(...zb, ...(zst != null ? [zst] : []));
+    const base = Math.min(...zb, ...(zc != null ? [zc] : []));
+    const loY = Math.max(Math.min(...lw), base - 1.5 * Math.max(1, hiY - base));
+    const yr = padRange(loY, hiY, 0.12);
+    const F = frame(svg, [0.5, K + 0.5], yr, [64, 24, 690, 188]);
+    grid(F, Math.max(1, Math.round(niceStep(K))), niceStep(yr[1] - yr[0]), [["iteration ", ""], ["k", "it"]], null);
+    const g = F.plot, cur = s.k;
+    if (cur >= 1) el("rect", { x: f2(F.X(cur - 0.5)), y: F.Tp, width: f2(F.kx), height: F.Bt - F.Tp, style: "fill: var(--accent-bg)" }, g);
+    if (zc != null) line(g, [F.L, F.Y(zc)], [F.R, F.Y(zc)], "stroke: var(--fg); stroke-width: 1.2; stroke-dasharray: 6 4");
+    if (zst != null && Math.abs(zst - (zc ?? NaN)) > 1e-9) line(g, [F.L, F.Y(zst)], [F.R, F.Y(zst)], "stroke: var(--fg); stroke-width: 1.2; stroke-dasharray: 1.5 3");
+    const nz = s.kind === "init" ? 0 : cur, nl = s.kind === "rmp" ? cur - 1 : nz;
+    const up = P.slice(0, nz).map(t => [t.k, t.z]);
+    if (up.length > 1) polyline(g, up.map(F.P), "fill: none; stroke: var(--ub); stroke-width: 2");
+    if (nl >= 1) {
+      const st = [];
+      P.slice(0, nl).forEach(t => { st.push([t.k - 0.5, Math.max(t.zmax, loY)], [t.k + 0.5, Math.max(t.zmax, loY)]); });
+      polyline(g, st.map(F.P), "fill: none; stroke: var(--lb); stroke-width: 1.5; stroke-dasharray: 5 3");
+    }
+    up.forEach(p => circ(F.top, F.P(p), 4.5, "fill: var(--ub); stroke: var(--bg); stroke-width: 1"));
+    P.slice(0, nl).forEach(t => {
+      if (t.lower >= F.y0) circ(F.top, F.P([t.k, t.lower]), 4.5, "fill: var(--lb); stroke: var(--bg); stroke-width: 1");
+      else { const x = F.X(t.k), y = F.Bt - 3; poly(F.top, [[x, y], [x - 5, y - 8], [x + 5, y - 8]], "fill: var(--lb)"); }
+    });
+    if (zc != null) txt(F.top, F.R - 6, F.Y(zc) - 6, S.zc, { "text-anchor": "end" });
+    if (zst != null && Math.abs(zst - (zc ?? NaN)) > 1e-9 && F.inY(zst)) txt(F.top, F.R - 6, F.Y(zst) - 6, S.zs, { "text-anchor": "end" });
+    legend("boundsLeg", [
+      [SW.line("var(--ub)"), `${H.zb}`],
+      [SW.dot("var(--lb)"), `${H.zl}`],
+      [SW.line("var(--lb)", "5 3", 1.5), `${H.zmax}`],
+      zc != null && [SW.line("var(--fg)", "6 4", 1.2), `${H.zc}`],
+      zst != null && [SW.line("var(--fg)", "1.5 3", 1.2), `${H.zs}`],
+    ]);
+  }
+
+  function renderIters(s) {
+    if (s.kind === "init") { $("iters").innerHTML = ""; return; }
+    const vec = u => (inst.m > 1 ? vecH(u) : numH(u[0]));
+    let h = `<table class="mx its"><tr><th>${I("k")}</th><th>${H.Qb}</th><th>${H.zb}</th><th>${H.ub}</th><th>${H.vb}</th>` +
+      `<th>min ${H.red}${T}${H.x}</th><th>${H.qb}</th><th>${H.cbqb}</th><th>${H.zl}</th><th>gap</th></tr>`;
+    for (const t of steps.slice(0, si + 1)) {
+      if (t.kind !== "price" && t !== s) continue;
+      if (t.kind !== "price" && t.kind !== "rmp") continue;
+      const p = t.kind === "price";
+      h += `<tr data-k="${t.k}" tabindex="0"${t.k === s.k ? ' class="cur"' : ""}><td>${t.k}</td><td>${Qset(t.Qb)}</td><td>${numH(t.z)}</td><td>${vec(t.u)}</td><td>${numH(t.v)}</td>` +
+        (p ? `<td>${numH(t.pv[t.qmin])}</td><td>${t.optimal ? "—" : qName(t.qbar)}</td><td>${numH(t.cbar)}</td><td>${numH(t.lower)}</td><td>${pct(t.gap)}</td>` : "<td></td>".repeat(5)) + "</tr>";
+    }
+    $("iters").innerHTML = h + "</table>";
+  }
+
+  // ---------------------------------------------------------------- render, stepping
+  const btn = { reset: $("bReset"), back: $("bBack"), step: $("bStep"), run: $("bRun"), end: $("bEnd") };
+  const page = $("page");
+  function render() {
+    const s = steps[si], two = inst.n === 2 && !inst.graph, one = inst.m === 1;
+    $("primSec").hidden = !(two || inst.graph);
+    if (inst.graph) renderNet(s); else if (two) renderPrim(s);
+    $("colSec").hidden = $("dualSec").hidden = !one;
+    if (one) { renderCols(s); renderDual(s); }
+    page.classList.toggle("nomain", !(two || inst.graph || one));
+    renderBLP(); renderStatus(s);
+    renderRMP(s); renderPricing(s); renderBounds(s); renderIters(s);
+    $("stepno").textContent = `Step ${si} of ${steps.length - 1}`;
+    btn.reset.disabled = btn.back.disabled = si === 0;
+    btn.step.disabled = btn.end.disabled = si === steps.length - 1;
+    setHot(hotQ);
+  }
+  function rebuild(toSi) {
+    steps = buildHistory(initQ, picks, opt);
+    si = Math.max(0, Math.min(toSi, steps.length - 1));
+    render();
+  }
+  function stopRun() {
+    if (timer) clearInterval(timer);
+    timer = null;
+    btn.run.textContent = "Run";
+  }
+  function go(i) {
+    stopRun();
+    si = Math.max(0, Math.min(i, steps.length - 1));
+    render();
+  }
+  // An iteration (a row of the table of iterations): its pricing step
+  const goIter = k => {
+    const i = steps.findIndex(t => t.kind === "price" && t.k === k);
+    go(i >= 0 ? i : steps.findIndex(t => t.kind === "rmp" && t.k === k));
+  };
+  btn.reset.addEventListener("click", () => go(0));
+  btn.back.addEventListener("click", () => go(si - 1));
+  btn.step.addEventListener("click", () => go(si + 1));
+  btn.end.addEventListener("click", () => go(steps.length - 1));
+  btn.run.addEventListener("click", () => {
+    if (timer) { stopRun(); return; }
+    if (si === steps.length - 1) { si = 0; render(); }
+    btn.run.textContent = "Pause";
+    timer = setInterval(() => {
+      if (si < steps.length - 1) { si++; render(); }
+      if (si === steps.length - 1) stopRun();
+    }, 1000);
+  });
+
+  // ---------------------------------------------------------------- hovering and choosing columns
+  function setHot(q) {
+    hotQ = q;
+    page.querySelectorAll(".hot").forEach(e => e.classList.remove("hot"));
+    page.classList.toggle("hovering", q !== null);
+    if (q !== null) page.querySelectorAll(`[data-q="${q}"]`).forEach(e => e.classList.add("hot"));
+  }
+  page.addEventListener("pointerover", e => {
+    const t = e.target.closest("[data-q]"), q = t ? +t.dataset.q : null;
+    if (q !== hotQ) setHot(q);
+  });
+  page.addEventListener("pointerleave", () => { if (hotQ !== null) setHot(null); });
+  // At the start: add q to or remove it from the initial Q̄. In a pricing step: let q (with c̄_q < 0) enter.
+  function choose(q) {
+    const s = steps[si];
+    if (q === ART || !inst.cols[q]) return;
+    if (s.kind === "init") {
+      stopRun();
+      initQ = initQ.includes(q) ? initQ.filter(p => p !== q) : [...initQ, q];
+      picks = {};
+      rebuild(0);
+    } else if (s.kind === "price" && !s.stop && s.red[q] < -1e-9 && q !== s.qbar) {
+      stopRun();
+      picks[s.k] = q;
+      for (const k of Object.keys(picks)) if (+k > s.k) delete picks[k];
+      rebuild(si);
+    }
+  }
+  page.addEventListener("click", e => {
+    const tr = e.target.closest("tr[data-k]");
+    if (tr) { goIter(+tr.dataset.k); return; }
+    const t = e.target.closest("[data-q]");
+    if (t && !t.closest(".panel")) choose(+t.dataset.q);
+  });
+  document.addEventListener("keydown", e => {
+    if (e.altKey || e.ctrlKey || e.metaKey || e.target.closest("input, textarea, select")) return;
+    if (e.key === "Enter" || e.key === " ") {
+      const tr = e.target.closest("tr[data-k], tr.pick");
+      if (!tr) return;
+      e.preventDefault();
+      const sel = tr.dataset.k !== undefined ? `#iters tr[data-k="${tr.dataset.k}"]` : `#pricing tr[data-q="${tr.dataset.q}"]`;
+      tr.click();
+      const again = document.querySelector(sel);
+      if (again) again.focus();
+      return;
+    }
+    const to = { ArrowRight: si + 1, ArrowLeft: si - 1, Home: 0, End: steps.length - 1 }[e.key];
+    if (to === undefined) return;
+    e.preventDefault();
+    go(to);
+  });
+
+  // ---------------------------------------------------------------- the instance
+  const exBtns = EXAMPLES.map((ex, i) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "btn"; b.textContent = ex.btn; b.title = ex.title;
+    b.addEventListener("click", () => {
+      stopRun();
+      setInstance(i, EXAMPLES[i]);
+      if (!editor.hidden) fillEditor();
+    });
+    $("exChoice").insertBefore(b, $("exCustom"));
+    return b;
+  });
+  // startQ: the initial columns (0-based), else spec.start, else the feasible column of the largest cost
+  // (none: the artificial column is added).
+  function setInstance(ix, spec, startQ) {
+    const I1 = makeInst(spec), N = I1.cols.length;
+    let q0 = startQ ?? spec.start ?? null;
+    if (q0 && q0.some(q => !Number.isInteger(q) || q < 0 || q >= N))
+      throw new Error(`Initial Q̄: the columns are q = 1, …, ${N} (as listed under Pricing).`);
+    if (!q0 || !q0.length) {
+      const fs = I1.cols.filter(k => k.feas);
+      q0 = fs.length ? [fs.reduce((p, k) => (k.c > p.c ? k : p)).q] : [];
+    }
+    inst = I1; exIndex = ix; customSpec = ix === "custom" ? spec : null;
+    initQ = [...new Set(q0)]; picks = {};
+    exBtns.forEach((b, i) => b.setAttribute("aria-pressed", String(i === ix)));
+    $("exCustom").setAttribute("aria-pressed", String(ix === "custom"));
+    $("artHelp").innerHTML = `An extra column a with cost ${I("M")} = ${numH(inst.art.c)} and ${H.A}-part ${H.b}, (${I("M")}, ${H.b}${T}, 1)${T}: ` +
+      `on its own it is feasible in the DW-RMP (9.5). It is added automatically when the initial columns give no feasible DW-RMP. ` +
+      `If ${OB(I("λ"))}${SUB("a")} &gt; 0 when no column has a negative reduced cost, the DW-MP (8.13) is infeasible. ` +
+      `(An aid for the illustration; not in the notes.)`;
+    rebuild(0);
+  }
+
+  // ---------------------------------------------------------------- options
+  const optPanel = $("optPanel"), optToggle = $("optToggle");
+  optToggle.addEventListener("click", () => {
+    optPanel.hidden = !optPanel.hidden;
+    optToggle.setAttribute("aria-expanded", String(!optPanel.hidden));
+  });
+  $("optReveal").addEventListener("change", e => { reveal = e.target.checked; render(); });
+  $("optArt").addEventListener("change", e => { opt.art = e.target.checked; stopRun(); rebuild(si); });
+  $("optEps").addEventListener("change", e => { opt.eps = +e.target.value; stopRun(); rebuild(si); });
+  document.querySelectorAll('input[name="dualview"]').forEach(r =>
+    r.addEventListener("change", () => { if (r.checked) { dualView = r.value; render(); } }));
+  const optLayout = $("optLayout");
+  const applyLayout = () => ["auto", "horizontal"].forEach(c => page.classList.toggle(c, optLayout.value === c));
+  optLayout.addEventListener("change", applyLayout);
+  // Shift an opened note sideways so it stays inside the window
+  const placeHelp = h => {
+    const pop = h.querySelector(".pop");
+    pop.style.transform = "";
+    const r = pop.getBoundingClientRect(), m = 8;
+    const dx = Math.max(m - r.left, Math.min(0, innerWidth - m - r.right));
+    if (dx) pop.style.transform = `translateX(calc(-50% + ${dx}px))`;
+  };
+  document.querySelectorAll(".help").forEach(h => {
+    h.addEventListener("mouseenter", () => placeHelp(h));
+    h.querySelector("button").addEventListener("click", () => { h.classList.toggle("open"); placeHelp(h); });
+  });
+  document.addEventListener("click", e => document.querySelectorAll(".help.open").forEach(h => { if (!h.contains(e.target)) h.classList.remove("open"); }));
+
+  // ---------------------------------------------------------------- the custom instance
+  // As text: c:1,1|A:1,1/3>=2/3|D:-1,2>=0 (X = {x binary : D x >= d}; D: empty for all binary x)
+  // or P:1,0;0,1 (X as a list of points), and Q:1,3 (the initial columns, 1-based).
+  const fmt = v => { const f = ratio(v); return f ? (f[1] === 1 ? String(f[0]) : f[0] + "/" + f[1]) : String(v); };
+  const RELT = { ge: ">=", le: "<=", eq: "=" };
+  const rowTxt = (a, r, b, sep = ", ") => `${a.map(fmt).join(sep)}${sep === ", " ? " " : ""}${RELT[r]}${sep === ", " ? " " : ""}${fmt(b)}`;
+  const parseVec = (t, what) => {
+    const v = t.trim().split(/[\s,]+/).filter(Boolean).map(parseNum);
+    if (!v.length || v.some(Number.isNaN)) throw new Error(`${what}: “${t.trim()}” is not a list of numbers.`);
+    return v;
+  };
+  const parseRows = (t, what) => t.split(/[\n;]/).map(r => r.trim()).filter(Boolean).map(r => {
+    const m = r.match(/^(.*?)(>=|=>|≥|<=|=<|≤|=)(.*)$/);
+    if (!m) throw new Error(`${what}: the row “${r}” needs >=, <= or =.`);
+    const b = parseNum(m[3]);
+    if (Number.isNaN(b)) throw new Error(`${what}: “${m[3].trim()}” on the right of the row “${r}” is not a number.`);
+    return { a: parseVec(m[1], what), rel: /[>≥]/.test(m[2]) ? "ge" : /[<≤]/.test(m[2]) ? "le" : "eq", b };
+  });
+  const parseIdx = t => {
+    const v = t.trim().split(/[\s,]+/).filter(Boolean);
+    if (!v.length || !v.every(x => /^\d+$/.test(x) && +x >= 1)) throw new Error("Initial Q̄: give column numbers q = 1, 2, … (comma-separated).");
+    return v.map(x => +x - 1);
+  };
+  const toSpec = (c, A, X, mode) => {
+    const sp = { c, A: A.map(r => r.a), rel: A.map(r => r.rel), b: A.map(r => r.b) };
+    if (mode === "pts") sp.pts = X;
+    else Object.assign(sp, { D: X.map(r => r.a), drel: X.map(r => r.rel), d: X.map(r => r.b) });
+    return sp;
+  };
+  function specString(sp) {
+    const parts = [`c:${sp.c.map(fmt).join(",")}`, `A:${sp.A.map((a, i) => rowTxt(a, sp.rel[i], sp.b[i], ",")).join(";")}`];
+    parts.push(sp.pts ? `P:${sp.pts.map(p => p.map(fmt).join(",")).join(";")}` : `D:${sp.D.map((a, i) => rowTxt(a, sp.drel[i], sp.d[i], ",")).join(";")}`);
+    if (sp.start && sp.start.length) parts.push(`Q:${sp.start.map(q => q + 1).join(",")}`);
+    return parts.join("|");
+  }
+  const defParts = str => {
+    const f = {};
+    str.split("|").forEach(p => { const i = p.indexOf(":"); if (i > 0) f[p.slice(0, i).trim()] = p.slice(i + 1); });
+    return f;
+  };
+  function paramSpec(str) {
+    const f = defParts(str);
+    if (!f.c || !f.A) throw new Error("The link’s instance (def) needs c:… and A:….");
+    const mode = f.P !== undefined ? "pts" : "cons";
+    const X = mode === "pts" ? f.P.split(";").filter(t => t.trim()).map(t => parseVec(t, "X")) : parseRows(f.D ?? "", "D x ≥ d");
+    const sp = toSpec(parseVec(f.c, "c"), parseRows(f.A, "A x ≥ b"), X, mode);
+    if (f.Q) sp.start = parseIdx(f.Q);
+    return sp;
+  }
+
+  const editor = $("editor"), exCustom = $("exCustom"), edMode = $("edXMode"), edErr = $("edError");
+  let consCache = "";
+  function setXMode(mode) {
+    edMode.value = mode;
+    $("edXLabel").innerHTML = mode === "cons" ? `${H.D}${H.x} ≥ ${H.d}` : `${H.X} =`;
+    $("edXHint").innerHTML = mode === "cons"
+      ? `rows of ${H.D}${H.x} ≥ ${H.d} as for ${H.A}; ${H.X} is the set of binary points satisfying them (empty: ${H.X} = 𝔹${SUP(I("n"))}; at most 300 points)`
+      : `one point ${H.xq} per line, e.g. <code>1, 0, 2</code>; the columns ${I("q")} = 1, 2, … in this order (at most 300)`;
+  }
+  const field = (id, f) => { try { return f(); } catch (e) { e.field = id; throw e; } };
+  function readForm(mode = edMode.value) {
+    const c = field("edC", () => parseVec($("edC").value, "c"));
+    const A = field("edA", () => parseRows($("edA").value, "A x ≥ b"));
+    if (!A.length) field("edA", () => { throw new Error("Give at least one row of A x ≥ b."); });
+    const X = field("edX", () => mode === "pts"
+      ? $("edX").value.split(/[\n;]/).map(t => t.trim()).filter(Boolean).map(t => parseVec(t, "X"))
+      : parseRows($("edX").value, "D x ≥ d"));
+    const sp = toSpec(c, A, X, mode), qs = $("edQ").value.trim();
+    if (qs) sp.start = field("edQ", () => parseIdx(qs));
+    return sp;
+  }
+  const clearBad = () => editor.querySelectorAll(".bad").forEach(i => i.classList.remove("bad"));
+  function showErr(e) {
+    const id = e.field ?? (/variables/.test(e.message) ? "edC" : /row of A|rows of A/.test(e.message) ? "edA"
+      : /Initial/.test(e.message) ? "edQ" : /D x|X |point|row of D/.test(e.message) ? "edX" : null);
+    if (id) $(id).classList.add("bad");
+    edErr.textContent = e.message;
+  }
+  // The editor shows the current instance. Built-in examples are shown by their constraints D x >= d, whose
+  // points are enumerated in another order than in the notes, so the initial columns are renumbered.
+  function fillEditor() {
+    clearBad(); edErr.textContent = "";
+    const sp = inst, dTxt = sp.D ? sp.D.map((a, i) => rowTxt(a, sp.drel[i], sp.d[i])).join("\n") : "";
+    let usePts = !!sp.pts;
+    // a built-in keeps its numbering of X in cons mode only if that is the enumeration order
+    if (usePts && exIndex !== "custom") {
+      const E = makeInst({ c: sp.c, A: sp.A, rel: sp.rel, b: sp.b, D: sp.D, drel: sp.drel, d: sp.d });
+      usePts = E.cols.length !== inst.cols.length || E.cols.some((k, i) => k.x.join() !== inst.cols[i].x.join());
+    }
+    $("edC").value = sp.c.map(fmt).join(", ");
+    $("edA").value = sp.A.map((a, i) => rowTxt(a, sp.rel[i], sp.b[i])).join("\n");
+    setXMode(usePts ? "pts" : "cons");
+    $("edX").value = usePts ? sp.pts.map(p => p.map(fmt).join(", ")).join("\n") : dTxt;
+    consCache = dTxt;
+    $("edQ").value = initQ.map(i => i + 1).join(", ");
+  }
+  // A link that failed to load: its parts, as given, for fixing
+  function fillRaw(str) {
+    const f = defParts(str), nl = t => (t ?? "").split(";").map(r => r.trim()).join("\n");
+    $("edC").value = f.c ?? ""; $("edA").value = nl(f.A);
+    setXMode(f.P !== undefined ? "pts" : "cons");
+    $("edX").value = nl(f.P !== undefined ? f.P : f.D);
+    $("edQ").value = f.Q ?? "";
+  }
+  function openEditor(on) {
+    editor.hidden = !on;
+    exCustom.setAttribute("aria-expanded", String(on));
+  }
+  exCustom.addEventListener("click", () => {
+    if (editor.hidden) { fillEditor(); openEditor(true); } else openEditor(false);
+  });
+  $("edClose").addEventListener("click", () => openEditor(false));
+  edMode.addEventListener("change", () => {
+    clearBad(); edErr.textContent = "";
+    if (edMode.value === "pts") {
+      consCache = $("edX").value;
+      try { const E = makeInst(readForm("cons")); $("edX").value = E.cols.map(k => k.x.map(fmt).join(", ")).join("\n"); }
+      catch (e) { $("edX").value = ""; }
+    } else $("edX").value = consCache;
+    setXMode(edMode.value);
+  });
+  function applyEditor() {
+    clearBad(); edErr.textContent = "";
+    try { const sp = readForm(); stopRun(); setInstance("custom", sp, sp.start ?? null); }
+    catch (e) { showErr(e); }
+  }
+  $("edApply").addEventListener("click", applyEditor);
+  editor.addEventListener("keydown", e => {
+    if (e.key === "Enter" && (e.target.matches("input") || (e.target.matches("textarea") && (e.ctrlKey || e.metaKey)))) { e.preventDefault(); applyEditor(); }
+  });
+  $("edLink").addEventListener("click", async () => {
+    clearBad(); edErr.textContent = "";
+    let sp;
+    try { sp = readForm(); makeInst(sp); } catch (e) { showErr(e); return; }
+    const url = `${location.href.split(/[?#]/)[0]}?ex=custom&def=${encodeURIComponent(specString(sp))}`;
+    try { await navigator.clipboard.writeText(url); edErr.innerHTML = `<span style="color: var(--pos)">Link copied.</span>`; }
+    catch (e) { window.prompt("Copy this link:", url); }
+  });
+
+  // ---------------------------------------------------------------- URL parameters, theme, start
+  const params = new URLSearchParams(location.search);
+  opt.art = params.get("art") === "1";
+  $("optArt").checked = opt.art;
+  const eps = parseFloat(params.get("eps"));
+  if (eps > 0 && eps < 1) {
+    const sel = $("optEps");
+    if (![...sel.options].some(o => +o.value === eps)) sel.add(new Option(`${+(100 * eps).toFixed(3)} %`, String(eps)));
+    sel.value = [...sel.options].find(o => +o.value === eps).value;
+    opt.eps = eps;
+  }
+  reveal = params.get("reveal") !== "0";
+  $("optReveal").checked = reveal;
+  if (params.get("view") === "uv") dualView = "uv";
+  document.querySelectorAll('input[name="dualview"]').forEach(r => { r.checked = r.value === dualView; });
+  if (["auto", "vertical", "horizontal"].includes(params.get("layout"))) optLayout.value = params.get("layout");
+  applyLayout();
+  let startP = null;
+  if (params.has("start")) { try { startP = parseIdx(params.get("start")); } catch (e) { startP = null; } }
+  const exP = params.get("ex");
+  let loadError = null;
+  if (exP === "custom" || (exP === null && params.has("def"))) {
+    try { const sp = paramSpec(params.get("def") ?? ""); setInstance("custom", sp, startP ?? sp.start ?? null); }
+    catch (e) { loadError = e; }
+  }
+  if (!inst) {
+    const n = parseInt(exP, 10), ix = n >= 1 && n <= EXAMPLES.length ? n - 1 : 0;
+    try { setInstance(ix, EXAMPLES[ix], startP); } catch (e) { setInstance(ix, EXAMPLES[ix]); }
+  }
+  const stepP = parseInt(params.get("step"), 10);
+  if (stepP > 0) { si = Math.min(stepP, steps.length - 1); render(); }
+  if (loadError) {
+    fillRaw(params.get("def") ?? "");
+    openEditor(true);
+    showErr(loadError);
+  }
+  // ?canvas=1 (embedded in Canvas): light mode, and the link to the standalone page. Otherwise the theme is
+  // the viewer's last choice (this browser only), else Auto, which follows the system's light/dark setting.
+  const canvas = params.has("canvas") && params.get("canvas") !== "0";
+  document.documentElement.classList.toggle("canvas", canvas);
+  $("corner").hidden = !canvas;
+  const optTheme = $("optTheme"), darkMQ = window.matchMedia("(prefers-color-scheme: dark)");
+  const applyTheme = () => {
+    const t = optTheme.value === "auto" ? (darkMQ.matches ? "dark" : "light") : optTheme.value;
+    document.documentElement.setAttribute("data-theme", t);
+  };
+  let theme = canvas ? "light" : null;
+  if (!theme) { try { theme = localStorage.getItem("column-generation-theme"); } catch (e) { theme = null; } }
+  optTheme.value = ["auto", "light", "dark"].includes(theme) ? theme : "auto";
+  applyTheme();
+  optTheme.addEventListener("change", () => {
+    try { localStorage.setItem("column-generation-theme", optTheme.value); } catch (e) { /* storage unavailable */ }
+    applyTheme();
+  });
+  darkMQ.addEventListener("change", () => { if (optTheme.value === "auto") applyTheme(); });
+})();
+</script>
+</body>
+</html>

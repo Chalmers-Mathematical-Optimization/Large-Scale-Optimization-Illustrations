@@ -10,8 +10,8 @@
   Problem shown:   min c^T x   s.t.  A_i^T x <= b_i  (i = 1, 2),   x in X_LP
   Relaxation:      h_LP(u) = min { c^T x + sum_{i in R} u_i (A_i^T x - b_i) :
                                    x in X_LP,  A_k^T x <= b_k  (k not in R) }
-  where R is the set of relaxed constraints, chosen with the checkboxes beside the constraint rows
-  of the system at the top (checked = relaxed). h_LP(u) <= z_LP.
+  where R is the set of relaxed constraints, chosen with the "Relax" checkboxes beside the constraint rows
+  of the system at the top (checked = relaxed; the button over a kept constraint's slider relaxes it too). h_LP(u) <= z_LP.
   A custom LP may require x to be integer, x in X_LP ∩ Z^2 (an IP): the subproblem's domain is then the
   convex hull of its integer points, and z_LP, h_LP, x*_LP are written z_IP, h_IP, x*_IP.
 
@@ -21,6 +21,7 @@
 
   The slider ranges are computed from the geometry so that every extreme point that is optimal
   for some u >= 0 can be reached (with ~15% headroom). Long arrows simply run off the view.
+  A legend under the sliders explains the figure's marks (it follows the current relaxation).
   The panel below the controls plots h_LP: one line per extreme point (one relaxed constraint),
   or a map over (u_1, u_2) coloured by the optimal extreme point (both relaxed).
 
@@ -64,6 +65,10 @@
     /* hues alternate around the wheel so consecutive (adjacent) extreme points contrast */
     --v0: #e8a317; --v1: #2f6fe0; --v2: #d6457a; --v3: #3fa34d;
     --v4: #8e3fb8; --v5: #1fb5c4; --v6: #a8552a; --v7: #6f6f78;
+    /* controls: resting and hovered borders, the accent (selection, focus, primary buttons), panel background */
+    --ctl-border: #c3c3cc; --ctl-hover: #85858f;
+    --accent: #1f5fbf; --accent-bg: #e6eefa; --on-accent: #ffffff;
+    --panel-bg: #f8f8fa;
   }
   /* data-theme is set by the script: the Theme dropdown, or ?canvas (light); Auto follows prefers-color-scheme. */
   :root[data-theme="dark"] {
@@ -72,6 +77,9 @@
     --c: #6fa4ff; --n1: #f39a4a; --n2: #b48cf0; --res: #ff6688; --pos: #4fcb87; --neg: #ff6b6b;
     --opt: #ffffff; --halo: #17171b; --star: #a67c00; --star-edge: #ffffff;
     --label-halo: #17171b; --label-halo-w: 4px;
+    --ctl-border: #44444e; --ctl-hover: #8a8a95;
+    --accent: #6fa4ff; --accent-bg: #1f2a3d; --on-accent: #0f0f12;
+    --panel-bg: #1d1d22;
   }
   html, body { margin: 0; background: var(--bg); color: var(--fg); }
   /* Keep room for the scrollbar, so the page doesn't shift sideways when the dual panel shows or hides */
@@ -81,45 +89,53 @@
           --math-font: "Latin Modern Roman", "CMU Serif", "Cambria", Georgia, serif; }
   body { font-family: var(--text-font); }
   .formula, .uval, .controls label[for], svg text, .wrap i, .wrap sub, .wrap sup { font-family: var(--math-font); }
-  .formula label.relax { font-family: var(--text-font); font-size: 0.9em; }
+  .formula label.relax { font-family: var(--text-font); font-size: 0.8em; }
   .wrap { position: relative; max-width: 760px; margin: 0 auto; padding: 12px 16px; box-sizing: border-box; }
-  /* Top-right corner: link to the standalone page (only with ?canvas=1) */
-  .corner { position: absolute; top: 8px; right: 12px; z-index: 1; display: flex; gap: 6px; }
-  .corner[hidden] { display: none; }
-  .cbtn { box-sizing: border-box; height: 30px; padding: 0 10px; display: inline-flex; align-items: center;
-          justify-content: center; border: 1px solid var(--grid); border-radius: 6px; background: var(--bg);
-          color: var(--muted); font: inherit; font-size: 0.85rem; line-height: 1; white-space: nowrap;
-          text-decoration: none; cursor: pointer; }
-  .cbtn:hover { color: var(--fg); border-color: var(--axis); }
-  /* Choice of LP, top left (clear of the corner button when it is shown) */
-  .lpchoice { margin: 2px 0 4px 0; font-size: 0.95rem; color: var(--muted); }
-  :root.canvas .lpchoice { margin-right: 150px; }
-  .lpchoice { display: flex; flex-wrap: wrap; gap: 6px; }
-  .lpchoice button, .lpeditor button { padding: 3px 10px; border: 1px solid var(--grid); border-radius: 6px;
-                     background: var(--bg); color: var(--fg); font: inherit; cursor: pointer; }
-  .lpchoice button:hover, .lpeditor button:hover { border-color: var(--axis); }
-  /* The LP shown */
-  .lpchoice button[aria-pressed="true"] { border-color: var(--xlp-stroke); background: var(--xlp-fill); }
-  .lpchoice .caret { display: inline-block; margin-left: 4px; font-size: 0.8em; transition: transform 0.15s; }
-  .lpchoice button[aria-expanded="true"] .caret { transform: rotate(180deg); }
-  .lpchoice .optbtn { margin-left: 10px; }
-  /* "Edit LP": a form with the LP's numbers */
-  .lpeditor { margin: 4px 0 8px; padding: 8px 10px; border: 1px solid var(--axis); border-radius: 6px; font-size: 0.95rem; }
-  .lpeditor[hidden] { display: none; }
+  [hidden] { display: none !important; }
+  /* Buttons: one look throughout (the small + / × buttons of the LP form and the "?" notes override it) */
+  /* inline-block, not flex: flex items ignore vertical-align, which would flatten the subscripts in LP names */
+  .btn, .lpeditor button, .options button, .reeval button { box-sizing: border-box; min-height: 30px; padding: 5px 12px;
+        display: inline-block; vertical-align: middle; text-align: center; border: 1px solid var(--ctl-border);
+        border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; font-size: 0.95rem; line-height: 1.2;
+        white-space: nowrap; text-decoration: none; cursor: pointer; transition: border-color 0.12s, background-color 0.12s; }
+  .btn:hover, .lpeditor button:hover:not(:disabled), .options button:hover, .reeval button:hover:not(:disabled) { border-color: var(--ctl-hover); }
+  /* Selected (the LP shown) and primary (Apply, Reoptimize) */
+  .btn[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-bg); box-shadow: inset 0 0 0 1px var(--accent); }
+  .lpeditor button.primary, .reeval button:not(:disabled) { border-color: var(--accent); background: var(--accent); color: var(--on-accent); }
+  .lpeditor button.primary:hover, .reeval button:hover:not(:disabled) { border-color: var(--accent); filter: brightness(1.08); }
+  .btn.quiet { color: var(--muted); font-size: 0.85rem; }
+  .btn.quiet:hover { color: var(--fg); }
+  .caret { display: inline-block; font-size: 0.75em; transition: transform 0.15s; }
+  [aria-expanded="true"] > .caret { transform: rotate(180deg); }
+  /* Keyboard focus */
+  :where(button, select, input, a):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  /* Toolbar: the choice of LP (left) and Options, plus with ?canvas=1 the link to the standalone page (right) */
+  .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 6px; }
+  .lpchoice { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  .tlabel { font-size: 0.85rem; color: var(--muted); margin-right: 2px; }
+  .tools { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 6px; margin-left: auto; }
+  /* Options and "Custom" (the LP form): panels under the toolbar, each with a title */
+  .panel { margin: 4px 0 10px; padding: 10px 12px; border: 1px solid var(--ctl-border); border-radius: 8px;
+           background: var(--panel-bg); font-size: 0.95rem; }
+  .phead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; margin-bottom: 8px; }
+  .ptitle { font-weight: 600; color: var(--fg); }
+  .psub { font-size: 0.85rem; color: var(--muted); }
+  /* "Custom": a form with the LP's numbers */
   .lpform { display: grid; grid-template-columns: auto 1fr; align-items: baseline; gap: 6px 10px; }
   .lpform .row, .lppts { font-family: var(--math-font); }
   .lpeditor .op { font-family: var(--math-font); color: var(--muted); }
-  .lpeditor input { box-sizing: border-box; width: 4.2em; padding: 2px 4px; border: 1px solid var(--axis); border-radius: 4px;
+  .lpeditor input[type=text] { box-sizing: border-box; width: 4.2em; padding: 3px 5px; border: 1px solid var(--ctl-hover); border-radius: 4px;
                     background: var(--bg); color: var(--fg); font: 0.9rem var(--text-font); text-align: right; }
   .lpeditor input.bad { border-color: var(--neg); outline: 1px solid var(--neg); }
   .lpeditor .row.n1 input, .lpeditor .row.n1 select { border-color: var(--n1); }
   .lpeditor .row.n2 input, .lpeditor .row.n2 select { border-color: var(--n2); }
-  .lpeditor select { padding: 1px 2px; border: 1px solid var(--axis); border-radius: 4px; background: var(--bg); color: var(--fg); font: inherit; }
+  .lpeditor select { padding: 2px 3px; border: 1px solid var(--ctl-hover); border-radius: 4px; background: var(--bg); color: var(--fg); font: inherit; }
   .lppts { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; margin-top: 8px; }
   .lppts .pt { white-space: nowrap; }
   .lppts[hidden], .lpform [hidden] { display: none; }
-  .lpxmode { margin-top: 8px; color: var(--muted); }
-  .lpxmode label { margin-left: 16px; white-space: nowrap; cursor: pointer; }
+  .lpxmode { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; margin-top: 10px; color: var(--muted); }
+  .lpxmode label { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; cursor: pointer; color: var(--fg); }
+  .lpxmode input[type=checkbox] { margin: 0; }
   /* X_LP by constraints: one per row, beside "X_LP = {x :", the last one closing the brace */
   .lpxcons { display: grid; grid-template-columns: auto 1fr; align-items: baseline; gap: 6px 10px; margin-top: 8px; font-family: var(--math-font); }
   .lpxcons[hidden] { display: none; }
@@ -127,7 +143,7 @@
   .lpxcons > .pt, .lpxcons > .add { grid-column: 2; justify-self: start; white-space: nowrap; }
   .lpxcons .close { visibility: hidden; }
   .lpxcons .pt.last .close { visibility: visible; }
-  .lpeditor button.del, .lpeditor button.add { margin-left: 2px; padding: 0 5px; line-height: 1.2; font-size: 0.85rem; color: var(--muted); }
+  .lpeditor button.del, .lpeditor button.add { min-height: 0; margin-left: 2px; padding: 0 5px; border-radius: 4px; line-height: 1.2; font-size: 0.85rem; color: var(--muted); }
   .lpeditor button.del:hover:not(:disabled), .lpeditor button.add:hover { color: var(--fg); }
   .lpeditor button:disabled { opacity: 0.35; cursor: not-allowed; }
   .lpeditor .lpbtns { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
@@ -170,36 +186,45 @@
   #fig text[data-lab].show { pointer-events: auto; cursor: pointer; }
   #fig .hit { fill: none; stroke: transparent; pointer-events: stroke; }
   #fig .hitarea { fill: transparent; stroke: none; }
-  .controls { display: flex; align-items: center; gap: 12px; margin-top: 8px; padding-bottom: 12px; font-size: 1.05rem; }   /* room for the ticks */
+  .controls { display: flex; align-items: center; gap: 12px; margin-top: 8px; padding-bottom: 14px; font-size: 1.05rem; }   /* room for the ticks */
   .controls .track { position: relative; flex: 1; min-width: 120px; display: flex; }
   .controls .track input[type=range] { flex: 1; width: 100%; margin: 0; }
   /* Tick strip under the slider; the insets approximate half the thumb width so ticks line up with values. */
-  .ticks { position: absolute; left: 8px; right: 8px; top: 100%; height: 12px; }   /* hangs below the slider */
+  .ticks { position: absolute; left: 8px; right: 8px; top: 100%; height: 14px; }   /* hangs below the slider */
   .tick { position: absolute; transform: translateX(-50%); top: 0; border: 0; background: none; padding: 0 4px;
-          font: inherit; font-size: 11px; line-height: 12px; cursor: pointer; }
+          font: inherit; font-size: 13px; line-height: 14px; cursor: pointer; transition: transform 0.1s; }
+  .tick:hover { transform: translateX(-50%) scale(1.3); }
   .tick.n1 { color: var(--n1); } .tick.n2 { color: var(--n2); }
-  .tick .star { color: var(--fg); font-size: 13px; }
+  .tick .star { color: var(--fg); font-size: 15px; }
   .controls.off .ticks { display: none; }
-  .controls[hidden] { display: none; }
-  .dual[hidden] { display: none; }
-  /* Options: under the buttons at the top, opened and closed by the "Options" button */
-  .options { margin: 4px 0 8px; padding: 2px 10px 8px; border: 1px solid var(--axis); border-radius: 6px; font-size: 0.95rem; }
-  .options[hidden] { display: none; }
-  .options label { display: inline-flex; align-items: center; gap: 6px; margin: 6px 20px 0 0; cursor: pointer; }
-  .options .labs { margin-top: 4px; color: var(--muted); }
-  .options .labs label { color: var(--fg); margin-left: 10px; margin-right: 0; }
+  /* Over the slider of a kept constraint: a button that relaxes the constraint */
+  .offnote { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 1; max-width: 100%;
+             padding: 3px 12px; border: 1px dashed currentColor; border-radius: 999px; background: var(--bg);
+             font: inherit; font-family: var(--text-font); font-size: 0.85rem; line-height: 1.3; white-space: nowrap;
+             overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+  .offnote:hover { border-style: solid; }
+  .controls:not(.off) .offnote { display: none; }
+  .controls label[for="u1"] { color: var(--n1); }
+  .controls label[for="u2"] { color: var(--n2); }
+  /* Options: under the toolbar, opened and closed by the "Options" button; groups of settings, each with a heading */
+  .options { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px 24px; }
+  .options .grp { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; }
+  .options .grp.wide { grid-column: 1 / -1; }
+  .options h3 { margin: 0 0 2px; font-size: 0.75rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+  .options h3 .psub { text-transform: none; letter-spacing: 0; font-weight: normal; }
+  .options label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+  .options label input { margin: 0; }
+  .options .labs { display: flex; flex-wrap: wrap; gap: 6px 18px; }
   .options .labs label.off { opacity: 0.4; cursor: not-allowed; }
-  .options button { padding: 3px 10px; border: 1px solid var(--grid); border-radius: 6px; background: var(--bg);
+  .options select { min-height: 30px; padding: 2px 6px; border: 1px solid var(--ctl-border); border-radius: 6px; background: var(--bg);
                     color: var(--fg); font: inherit; cursor: pointer; }
-  .options button:hover { border-color: var(--axis); }
-  .options select { padding: 2px 6px; border: 1px solid var(--grid); border-radius: 6px; background: var(--bg);
-                    color: var(--fg); font: inherit; cursor: pointer; }
-  .options select:hover { border-color: var(--axis); }
+  .options select:hover { border-color: var(--ctl-hover); }
+  .options .prow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
   /* "?" beside an option: its note shows while hovering, or stays open after a click (until a click elsewhere) */
-  .options .opt { display: inline-flex; align-items: center; margin-right: 20px; }
-  .options .opt > label { margin-right: 6px; }
-  .help { position: relative; display: inline-flex; margin-top: 6px; }
-  .help > button { box-sizing: border-box; width: 18px; height: 18px; padding: 0; border: 1px solid var(--axis);
+  .options .opt { display: inline-flex; align-items: center; gap: 6px; }
+  .help { position: relative; display: inline-flex; }
+  .help > button { box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center;
+                   width: 18px; height: 18px; min-height: 0; padding: 0; border: 1px solid var(--axis);
                    border-radius: 50%; color: var(--muted); font-size: 12px; line-height: 1; }
   .help > button:hover, .help.open > button { color: var(--fg); border-color: var(--fg); }
   .help .pop { display: none; position: absolute; z-index: 2; left: 50%; top: calc(100% + 6px); transform: translateX(-50%);
@@ -211,18 +236,31 @@
   /* Slider of a constraint that is not relaxed: greyed out */
   .controls.off label[for], .controls.off .uval, .controls.off input[type=range] { opacity: 0.4; }
   .controls input[type=range]:disabled { cursor: not-allowed; }
-  /* "Reevaluate" under the sliders, when the subproblem is not solved immediately */
+  /* "Reoptimize" under the sliders, when the subproblem is not solved immediately */
   .reeval { display: flex; justify-content: center; margin-top: 2px; }
-  .reeval[hidden] { display: none; }
-  .reeval button { padding: 3px 14px; border: 1px solid var(--axis); border-radius: 6px; background: var(--bg);
-                   color: var(--fg); font: inherit; cursor: pointer; }
-  .reeval button:hover:not(:disabled) { border-color: var(--fg); }
-  .reeval button:disabled { opacity: 0.4; cursor: default; }
+  .reeval button:disabled { opacity: 0.45; cursor: default; }
+  /* Legend under the sliders: what the marks in the graph mean */
+  .legend { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 4px 16px;
+            margin: 10px 0 0; padding: 8px 10px; border-top: 1px solid var(--grid); font-size: 0.82rem; color: var(--muted); }
+  .legend .li { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .legend svg { height: 14px; display: inline-block; flex: none; overflow: visible; }
+  .legend .mk { width: 14px; text-align: center; color: var(--fg); }
+  .legend .tip { flex-basis: 100%; text-align: center; font-style: italic; }
+  .legend .tip, .legend .li > span { font-family: var(--text-font); }
   .wrap sub, .wrap sup { line-height: 0; }   /* keep scripts from stretching the line box */
   #u1, .relax1 { accent-color: var(--n1); }
   #u2, .relax2 { accent-color: var(--n2); }
-  .formula label.relax { margin-left: 0.3em; cursor: pointer; white-space: nowrap; }
-  .formula label.relax input { margin: 0 0.2em 0 0; cursor: pointer; vertical-align: middle; }
+  .formula label.relax { display: inline-flex; align-items: center; gap: 0.3em; margin-left: 0.5em; padding: 0 0.6em 0 0.45em;
+                         border: 1px solid var(--ctl-border); border-radius: 999px; line-height: 1.55; cursor: pointer;
+                         white-space: nowrap; transition: background-color 0.12s, border-color 0.12s; }
+  .formula label.relax.k1 { border-color: color-mix(in srgb, var(--n1) 60%, transparent); }
+  .formula label.relax.k2 { border-color: color-mix(in srgb, var(--n2) 60%, transparent); }
+  .formula label.relax.k1:hover, .formula label.relax.k1.on { border-color: var(--n1); }
+  .formula label.relax.k2:hover, .formula label.relax.k2.on { border-color: var(--n2); }
+  .formula label.relax.k1.on { background: color-mix(in srgb, var(--n1) 16%, transparent); }
+  .formula label.relax.k2.on { background: color-mix(in srgb, var(--n2) 16%, transparent); }
+  .formula label.relax input { margin: 0; cursor: pointer; }
+  .formula .vcap { margin-right: 0.3em; font-style: normal; }
   .uval { min-width: 4.5em; font-variant-numeric: tabular-nums; }
   .n1 { color: var(--n1); } .n2 { color: var(--n2); }
   .cobj, .formula .val b.cobj { color: var(--c); }
@@ -235,33 +273,41 @@
   .formula .stk .inactive { text-decoration: none; justify-self: stretch; text-align: center;
                             background: linear-gradient(currentColor, currentColor) no-repeat 0 58% / 100% 1px; }
   .dual { margin-top: 14px; border-top: 1px solid var(--grid); padding-top: 10px; }
+  /* Section headings of the dual-function panel */
+  .dual h2 { margin: 0 0 6px; font-size: 1rem; font-weight: 600; text-align: center; }
+  .dual h2.sub { margin-top: 18px; }
+  .dual h2 i, .dual h2 sub { font-weight: normal; }
   /* Layout "Horizontal": the dual-function panel to the right of the rest; "Auto": the same when the
      window is wide enough, else stacked as in "Vertical". */
   .wrap.horizontal { max-width: 1520px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 28px; }
   /* the dual-function panel beside the figure and controls (the .main column), centred against them */
   .wrap.horizontal > .dual { align-self: center; margin-top: 0; border-top: 0; padding-top: 0; }
-  /* the choice of LP and the written-out LP across both columns, centred on the page */
+  /* the toolbar and the written-out LP across both columns; the panels centred on the page */
   .wrap.horizontal > .top { grid-column: 1 / -1; }
-  .wrap.horizontal .lpchoice { margin: 2px 76px 4px; justify-content: center; }
-  .wrap.horizontal .lpeditor, .wrap.horizontal .options { max-width: 720px; margin: 4px auto 8px; }
+  .wrap.horizontal .lpeditor, .wrap.horizontal .options { max-width: 760px; margin: 4px auto 10px; }
   @media (min-width: 1000px) {
     .wrap.auto { max-width: 1520px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 28px; }
     .wrap.auto > .dual { align-self: center; margin-top: 0; border-top: 0; padding-top: 0; }
     .wrap.auto > .top { grid-column: 1 / -1; }
-    .wrap.auto .lpchoice { margin: 2px 76px 4px; justify-content: center; }
-    .wrap.auto .lpeditor, .wrap.auto .options { max-width: 720px; margin: 4px auto 8px; }
+    .wrap.auto .lpeditor, .wrap.auto .options { max-width: 760px; margin: 4px auto 10px; }
   }
   #dualfig { touch-action: none; cursor: crosshair; }
   #dualfig.rotate { cursor: grab; }
   #dualfig.rotate:active { cursor: grabbing; }
-  .mapmode { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 4px 14px;
-             font-size: 0.9rem; color: var(--muted); margin-bottom: 4px; }
-  .mapmode label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
-  .mapmode[hidden] { display: none; }
-  #subfig { margin-top: 14px; }
-  .dualcap { font-size: 0.9rem; color: var(--muted); text-align: center; line-height: 1.6; margin: 4px 8px 0; }
-  .dualcap ul { display: inline-block; text-align: left; margin: 0; padding-left: 1.4em; }
-  .dualcap ol { margin: 0; padding-left: 1.6em; }
+  /* View of h_LP over two prices: a segmented choice (radio buttons styled as toggle buttons) */
+  .mapmode { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 6px;
+             font-size: 0.9rem; color: var(--muted); margin-bottom: 6px; }
+  .mapmode label { position: relative; display: inline-flex; cursor: pointer; }
+  .mapmode input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+  .mapmode label > span { padding: 4px 12px; border: 1px solid var(--ctl-border); border-radius: 999px; color: var(--fg);
+                          transition: border-color 0.12s, background-color 0.12s; }
+  .mapmode label:hover > span { border-color: var(--ctl-hover); }
+  .mapmode input:checked + span { border-color: var(--accent); background: var(--accent-bg); box-shadow: inset 0 0 0 1px var(--accent); }
+  .mapmode input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+  #subfig { margin-top: 4px; }
+  .dualcap { max-width: 640px; margin: 6px auto 0; padding: 0 8px; font-size: 0.9rem; color: var(--muted); line-height: 1.55; }
+  .dualcap ul { margin: 0; padding-left: 1.4em; }
+  .dualcap li + li { margin-top: 2px; }
   /* The subgradient caption over a hidden copy of its longest version, so its height doesn't change with u */
   #subcap { display: grid; }
   #subcap > span { grid-area: 1 / 1; }
@@ -271,53 +317,73 @@
 </head>
 <body>
 <div class="wrap" id="page">
-  <div class="corner" id="corner" hidden>
-    <a class="cbtn" target="_blank" rel="noopener" title="Open in a new tab (GitHub Pages)"
-       href="https://chalmers-mathematical-optimization.github.io/Large-Scale-Optimization-Illustrations/Lagrangean%20Relaxation.html">View as standalone</a>
-  </div>
   <div class="top">
-  <div class="lpchoice" id="lpChoice" role="group" aria-label="LP">
-    <button type="button" id="lpCustom" aria-expanded="false" aria-controls="lpEditor">Custom<span class="caret" aria-hidden="true">▾</span></button>
-    <button type="button" id="optToggle" class="optbtn" aria-expanded="false" aria-controls="optPanel">Options<span class="caret" aria-hidden="true">▾</span></button></div>
-  <div class="options" id="optPanel" hidden>
-    <label><input type="checkbox" id="optVectors" checked> Penalty vectors</label>
-    <span class="opt" id="optGDistRow"><label><input type="checkbox" id="optGDist"> Constraint distances</label><span class="help">
-      <button type="button" aria-label="About constraint distances" aria-describedby="gdistHelp">?</button>
-      <span class="pop" id="gdistHelp" role="tooltip">Dotted lines from <i>x</i>(<i>u</i>) to the relaxed constraints, of length
-        |<i>g</i><sub><i>i</i></sub>| / ‖<i>A</i><sub><i>i</i></sub>‖ for the subgradient components <i>g</i><sub><i>i</i></sub> = <i>A</i><sub><i>i</i></sub><sup>T</sup><i>x</i>(<i>u</i>) − <i>b</i><sub><i>i</i></sub>.</span>
-    </span></span>
-    <span class="opt"><label><input type="checkbox" id="optFit"> Fit graph</label><span class="help">
-      <button type="button" aria-label="About fit graph" aria-describedby="fitHelp">?</button>
-      <span class="pop" id="fitHelp" role="tooltip">Scales the graph so all elements are visible.</span>
-    </span></span>
-    <span class="opt"><label><input type="checkbox" id="optImmediate" checked> Immediate subproblem solve</label><span class="help">
-      <button type="button" aria-label="About immediate subproblem solve" aria-describedby="immHelp">?</button>
-      <span class="pop" id="immHelp" role="tooltip">When off, changing <i>u</i> does not update the graphs and values
-        until “Reevaluate” is clicked, as solving the subproblem typically takes time.</span>
-    </span></span>
-    <label>Layout <select id="optLayout">
-      <option value="auto">Auto</option>
-      <option value="vertical">Vertical</option>
-      <option value="horizontal">Horizontal</option>
-    </select></label>
-    <label>Theme <select id="optTheme">
-      <option value="auto">Auto</option>
-      <option value="light">Light</option>
-      <option value="dark">Dark</option>
-    </select></label>
-    <div class="labs" id="labelGroups">Labels:</div>
+  <div class="toolbar">
+    <div class="lpchoice" id="lpChoice" role="group" aria-label="Problem">
+      <span class="tlabel" aria-hidden="true">Problem</span>
+      <button type="button" class="btn" id="lpCustom" aria-expanded="false" aria-controls="lpEditor"
+              title="Enter your own LP">Custom <span class="caret" aria-hidden="true">▾</span></button></div>
+    <div class="tools">
+      <button type="button" class="btn" id="optToggle" aria-expanded="false" aria-controls="optPanel">Options <span class="caret" aria-hidden="true">▾</span></button>
+      <a class="btn quiet" id="corner" hidden target="_blank" rel="noopener" title="Open in a new tab (GitHub Pages)"
+         href="https://chalmers-mathematical-optimization.github.io/Large-Scale-Optimization-Illustrations/Lagrangean%20Relaxation.html">View as standalone ↗</a>
+    </div>
   </div>
-  <div class="lpeditor" id="lpEditor" hidden>
+  <div class="options panel" id="optPanel" hidden>
+    <div class="grp">
+      <h3>Show</h3>
+      <label><input type="checkbox" id="optVectors" checked> Penalty vectors</label>
+      <span class="opt" id="optGDistRow"><label><input type="checkbox" id="optGDist"> Constraint distances</label><span class="help">
+        <button type="button" aria-label="About constraint distances" aria-describedby="gdistHelp">?</button>
+        <span class="pop" id="gdistHelp" role="tooltip">Dotted: <i>x</i>(<i>u</i>) to relaxed constraints, length
+          |<i>g</i><sub><i>i</i></sub>| / ‖<i>A</i><sub><i>i</i></sub>‖, <i>g</i><sub><i>i</i></sub> = <i>A</i><sub><i>i</i></sub><sup>T</sup><i>x</i>(<i>u</i>) − <i>b</i><sub><i>i</i></sub></span>
+      </span></span>
+      <span class="opt"><label><input type="checkbox" id="optFit"> Fit graph</label><span class="help">
+        <button type="button" aria-label="About fit graph" aria-describedby="fitHelp">?</button>
+        <span class="pop" id="fitHelp" role="tooltip">Zoom to show everything</span>
+      </span></span>
+    </div>
+    <div class="grp">
+      <h3>Solving</h3>
+      <span class="opt"><label><input type="checkbox" id="optImmediate" checked> Immediate subproblem solve</label><span class="help">
+        <button type="button" aria-label="About immediate subproblem solve" aria-describedby="immHelp">?</button>
+        <span class="pop" id="immHelp"         role="tooltip">Off: graphs update only on “Reoptimize”
+                  (real subproblems are slow to solve)</span>
+      </span></span>
+    </div>
+    <div class="grp">
+      <h3>Display</h3>
+      <div class="prow">
+        <label>Layout <select id="optLayout">
+          <option value="auto">Auto</option>
+          <option value="vertical">Vertical</option>
+          <option value="horizontal">Horizontal</option>
+        </select></label>
+        <label>Theme <select id="optTheme">
+          <option value="auto">Auto</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select></label>
+      </div>
+    </div>
+    <div class="grp wide">
+      <h3>Labels <span class="psub">— checked: always; else on hover (click to pin)</span></h3>
+      <div class="labs" id="labelGroups"></div>
+    </div>
+  </div>
+  <div class="lpeditor panel" id="lpEditor" hidden>
+    <div class="phead"><span class="ptitle">Custom LP</span>
+      <span class="psub">Edit, then Apply (or Enter)</span></div>
     <div class="lpform" id="lpForm"></div>
-    <div class="lpxmode"><i>X</i><sub>LP</sub> given by <select id="lpXMode" aria-label="X_LP given by">
-      <option value="pts">extreme points</option><option value="cons">constraints</option></select>
-      <label><input type="checkbox" id="lpInt"> integer <i>x</i>: <i>x</i> ∈ <i>X</i><sub>LP</sub> ∩ ℤ<sup>2</sup></label></div>
+    <div class="lpxmode"><span><i>X</i><sub>LP</sub> given by <select id="lpXMode" aria-label="X_LP given by">
+      <option value="pts">extreme points</option><option value="cons">constraints</option></select></span>
+      <label><input type="checkbox" id="lpInt"> <span>integer <i>x</i>: <i>x</i> ∈ <i>X</i><sub>LP</sub> ∩ ℤ<sup>2</sup></span></label></div>
     <div class="lppts" id="lpPts"><span class="op"><i>X</i><sub>LP</sub> = conv</span>
       <button type="button" id="lpAddPt" class="add" title="Add a point" aria-label="Add a point">+</button></div>
     <div class="lpxcons" id="lpXCons" hidden><span class="op"><i>X</i><sub>LP</sub> = {<i>x</i> :</span>
       <button type="button" id="lpAddXc" class="add" title="Add a constraint" aria-label="Add a constraint of X_LP">+</button></div>
     <div class="lpnote" id="lpNote" role="status" hidden></div>
-    <div class="lpbtns"><button type="button" id="lpApply">Apply</button><button type="button" id="lpClose">Close</button>
+    <div class="lpbtns"><button type="button" id="lpApply" class="primary">Apply</button><button type="button" id="lpClose">Close</button>
       <span class="lperror" id="lpError" role="alert"></span></div>
   </div>
   <div class="formula" id="formula"></div>
@@ -326,25 +392,29 @@
   <svg id="fig" viewBox="0 0 720 600" role="img" aria-label="Polyhedron X_LP cut by two constraints, with the objective vector, the scaled constraint normals and the resulting Lagrangean objective direction."></svg>
   <div class="controls" id="row1">
     <label for="u1"><i>u</i><sub>1</sub></label>
-    <span class="track"><input id="u1" type="range" min="0" max="2.5" step="0.01" value="0"><span class="ticks" id="ticks1"></span></span>
+    <span class="track"><input id="u1" type="range" min="0" max="2.5" step="0.01" value="0"><span class="ticks" id="ticks1"></span>
+      <button type="button" class="offnote n1" data-i="0">Relax to set <i>u</i><sub>1</sub></button></span>
     <span class="uval" id="uval1">= 0.00</span>
   </div>
   <div class="controls" id="row2">
     <label for="u2"><i>u</i><sub>2</sub></label>
-    <span class="track"><input id="u2" type="range" min="0" max="2.5" step="0.01" value="0"><span class="ticks" id="ticks2"></span></span>
+    <span class="track"><input id="u2" type="range" min="0" max="2.5" step="0.01" value="0"><span class="ticks" id="ticks2"></span>
+      <button type="button" class="offnote n2" data-i="1">Relax to set <i>u</i><sub>2</sub></button></span>
     <span class="uval" id="uval2">= 0.00</span>
   </div>
   <div class="reeval" id="reevalRow" hidden><button type="button" id="reeval" disabled>Reoptimize</button></div>
+  <div class="legend" id="legend" aria-label="Legend"></div>
   </div>
   <div class="dual" id="dual">
-    <div class="mapmode" id="mapmode">
-      Mode:
-      <label><input type="radio" name="mapmode" value="3d" checked> <span>3D</span></label>
-      <label><input type="radio" name="mapmode" value="vertex"> <span>2D (Color by segment)</span></label>
-      <label><input type="radio" name="mapmode" value="value"> <span>2D (Color by value of <i>h</i><sub class="pb">LP</sub>(<i>u</i>))</span></label>
+    <h2>Dual function <i>h</i><sub class="pb">LP</sub>(<i>u</i>)</h2>
+    <div class="mapmode" id="mapmode" role="radiogroup" aria-label="View of the dual function">
+      <label><input type="radio" name="mapmode" value="3d" checked><span>3D</span></label>
+      <label><input type="radio" name="mapmode" value="vertex"><span>2D: by segment</span></label>
+      <label><input type="radio" name="mapmode" value="value"><span>2D: by value</span></label>
     </div>
     <svg id="dualfig" viewBox="0 0 720 290" role="img" aria-label="The dual function h_LP plotted against the Lagrangean prices."></svg>
     <div class="dualcap" id="dualcap"></div>
+    <h2 class="sub" id="subhead">Subgradients of <i>h</i><sub class="pb">LP</sub> at <i>u</i></h2>
     <svg id="subfig" viewBox="0 0 720 230" role="img" aria-label="The subdifferential of h_LP at u, in subgradient coordinates."></svg>
     <div class="dualcap" id="subcap"></div>
   </div>
@@ -992,6 +1062,38 @@
       ? expr.map((e, n) => `<span class="${["t1", "s", "t2", "m", "r"][n]}${cls}">${e}</span>`).join("")
       : `<span class="obj">${expr}</span>`) + (Array.isArray(expr) ? `<span class="x">${extra}</span>` : "");
   let showDual = true;
+  const legendBox = document.getElementById("legend");
+  let legendHtml = "";
+  // Small swatches for the legend, drawn like the figure's marks (24 x 14 px).
+  const sw = (body, w = 24) => `<svg viewBox="0 0 ${w} 14" style="width:${w}px" aria-hidden="true">${body}</svg>`;
+  const lineSw = (col, dash, w) => sw(`<line x1="1" y1="7" x2="23" y2="7" stroke-width="${w}"` +
+    `${dash ? ` stroke-dasharray="${dash}"` : ""} style="stroke:var(${col})"/>`);
+  const arrowSw = (col, dash = "") => sw(`<line x1="1" y1="7" x2="16" y2="7" stroke-width="2.4"` +
+    `${dash ? ` stroke-dasharray="${dash}"` : ""} style="stroke:var(${col})"/><polygon points="23,7 15,3 15,11" style="fill:var(${col})"/>`);
+  const starSw = sw(`<polygon points="${Array.from({ length: 10 }, (_, n) => {
+    const r = n % 2 ? 2.8 : 6.6, a = -Math.PI / 2 + n * Math.PI / 5;
+    return `${(7 + r * Math.cos(a)).toFixed(2)},${(7.5 + r * Math.sin(a)).toFixed(2)}`;
+  }).join(" ")}" stroke-width="1" style="fill:var(--star);stroke:var(--star-edge)"/>`, 14);
+  const dotSw = sw(`<circle cx="7" cy="7" r="6" style="fill:var(--halo)"/><circle cx="7" cy="7" r="4.5" style="fill:var(--opt)"/>`, 14);
+  const ptsSw = sw([0, 1, 2].map(j => `<circle cx="${4 + 8 * j}" cy="7" r="3.6" style="fill:${VCOL(j)}"/>`).join(""), 24);
+  function renderLegend(R, vecsOn, anyU) {
+    const ua = i => `<i>u</i><sub>${i + 1}</sub><i>A</i><sub>${i + 1}</sub>`;
+    const items = [
+      [starSw, `<i>x</i><sup>*</sup><sub>${PB()}</sub> optimum`],
+      ...(R.length ? [[dotSw, `<i>x</i>(<i>u</i>) subproblem solution`]] : []),
+      [ptsSw, "extreme points"],
+      [arrowSw("--c"), "objective <i>c</i>"],
+      ...(R.length ? [[arrowSw("--res"), `<i>c</i> + ${R.map(ua).join(" + ")}`]] : []),
+      ...(R.length && vecsOn ? [[arrowSw(NCOL[R[0]], "4 3"), `penalty ${R.length > 1 ? "vectors" : "vector"} ${R.map(ua).join(", ")}`]] : []),
+      [lineSw(anyU ? "--res" : "--c", "6 4", 1.6), `level line through ${R.length ? "<i>x</i>(<i>u</i>)" : `<i>x</i><sup>*</sup><sub>${PB()}</sub>`}`],
+      ...CONS.map((_, i) => [lineSw(NCOL[i], R.includes(i) ? "6 4" : "", R.includes(i) ? 1.6 : 2.4),
+                             `constraint ${i + 1} ${R.includes(i) ? "relaxed" : "kept"}`]),
+      ...(R.length ? [[`<span class="mk">☆</span>`, "optimal price"], [`<span class="mk">▲</span>`, "<i>x</i>(<i>u</i>) switches"]] : []),
+    ];
+    const html = items.map(([s, t]) => `<span class="li">${s}<span>${t}</span></span>`).join("") +
+      `<span class="tip">Hover/click marks for labels${R.length ? "; click ☆/▲ under slider to jump" : ""}</span>`;
+    if (html !== legendHtml) { legendHtml = html; legendBox.innerHTML = html; }
+  }
 
   function render() {
     const I = CONS.map((_, i) => i);                           // the LP's constraints (a custom LP may have one)
@@ -1031,7 +1133,8 @@
         const b = document.createElement("button");
         b.type = "button"; b.className = `tick n${i + 1}`;
         b.innerHTML = star ? `<span class="star">☆</span>` : "▲";
-        b.title = `${star ? "optimal" : "x(u) switches extreme point at"} u${i + 1} = ${fmt(v)}`;
+        b.title = `${star ? "Optimal" : "x(u) switches at"} u${i + 1} = ${fmt(v)} (click to set)`;
+        b.setAttribute("aria-label", b.title);
         b.style.left = `${100 * v / +sliders[i].max}%`;
         b.addEventListener("click", () => { sliders[i].step = "any"; sliders[i].value = String(v); uChanged(); });
         ticks[i].appendChild(b);
@@ -1298,7 +1401,10 @@
     const xHtml = "<i>x</i>";
     const stk = (cells, cl = "") => `<span class="stk${cl}">` +
       cells.map(([v, e, c = ""]) => `<span class="val">${v}</span><span class="${c}">${e}</span>`).join("") + "</span>";
-    const lhs = stk([[`<b>${fmt(h)}</b> =`, `<span class="lhs"><span${R.length ? "" : ' class="hid"'}><i>h</i><sub>${PB()}</sub>(<i>u</i>) =</span>` +
+    // The values row is captioned with the point it is evaluated at (both captions in one cell, so the width stays).
+    const vcap = `<span class="lhs vcap"><span${R.length ? "" : ' class="hid"'}>at <i>x</i>(<i>u</i>):</span>` +
+                 `<span${R.length ? ' class="hid"' : ""}>at <i>x</i><sup>*</sup><sub>${PB()}</sub>:</span></span>`;
+    const lhs = stk([[`${vcap} <b>${fmt(h)}</b> =`, `<span class="lhs"><span${R.length ? "" : ' class="hid"'}><i>h</i><sub>${PB()}</sub>(<i>u</i>) =</span>` +
                 `<span${R.length ? ' class="hid"' : ""}><i>z</i><sub>${PB()}</sub> =</span></span>`]], " end");
     // Every penalty term and constraint is always shown, in their constraint's colour; the inactive
     // one of each pair (penalty of a kept constraint, constraint that is relaxed) is dimmed and struck through.
@@ -1315,11 +1421,18 @@
     });
     const stRows = [...I.map(i => [consHtml(i), ` n${i + 1}${inact(K.includes(i))}`]),
                     [["", "", xHtml, "&nbsp;∈&nbsp;", "<i>X</i><sub>LP</sub>" + (INT ? "&nbsp;∩&nbsp;ℤ<sup>2</sup>" : "")], ""]];
-    const relaxBox = i => `<label class="relax"><input type="checkbox" class="relax${i + 1}" data-i="${i}"` +
-      `${R.includes(i) ? " checked" : ""}> Relax</label>`;
+    // "Relax" chip beside each constraint, in its colour (tinted while relaxed).
+    const relaxBox = i => {
+      const on = R.includes(i), tip = on
+        ? `Relaxed: in objective with price u${i + 1}. Uncheck to keep.`
+        : `Move into objective with price u${i + 1}`;
+      return `<label class="relax k${i + 1}${on ? " on" : ""}" title="${tip}"><input type="checkbox" class="relax${i + 1}" data-i="${i}"` +
+        `${on ? " checked" : ""}> Relax</label>`;
+    };
     formula.innerHTML = `<div class="f">${fRow(lhs, stk([["&nbsp;", `<span class="under"><span>min</span><i>x</i></span>`]]), stk(obj))}` +
       stRows.map(([r, cls], n) => fRow("", n === 0 ? "s. t." : "", r, n < I.length ? relaxBox(n) : "", cls)).join("") + "</div>";
 
+    renderLegend(R, vecsOn, anyU);
     curOpt = opt;
     renderDual(R, P, u, best, h, sub);
   }
@@ -1364,7 +1477,7 @@
     const in3d = R.length === 2 && mapMode === "3d";
     dsvg.classList.toggle("rotate", in3d);
     (R.length === 1 ? dual1D : in3d ? dual3D : dual2D)(R, P, u, best, h, sub);
-    [ssvg, scap].forEach(e => e.toggleAttribute("hidden", !SUBGRADIENTS));
+    [ssvg, scap, document.getElementById("subhead")].forEach(e => e.toggleAttribute("hidden", !SUBGRADIENTS));
     if (SUBGRADIENTS) renderSub(R, P, u, h, sub);
     else subDrag = null;
   }
@@ -1502,8 +1615,9 @@
     const DRAG = ", which moves as <i>x</i>(<i>u</i>) is dragged in the figure; drag it here to move <i>x</i>(<i>u</i>).";
     const OPT0 = " <i>u</i> is optimal: some subgradient has <i>g</i><sub><i>i</i></sub> ≤ 0 where <i>u</i><sub><i>i</i></sub> = 0 and <i>g</i><sub><i>i</i></sub> = 0 where <i>u</i><sub><i>i</i></sub> &gt; 0.";
     const cap = (drag, opt) =>
-      `Subgradient for current <i>x</i> shown with a dot. Full subdifferential for current <i>u</i> in shaded region if it contains more than subgradient. ` +
-      `The arrow from 0 is its length ‖<i>g</i>‖; with several subgradients, the dashed line goes to the shortest one. `;
+      `<ul><li>Dot: subgradient <i>g</i>(<i>x</i>(<i>u</i>)); shaded: subdifferential ∂<i>h</i><sub>${PB()}</sub>(<i>u</i>)</li>` +
+      `<li>Arrow: ‖<i>g</i>‖; dashed: shortest subgradient</li>` +
+      (drag ? `<li>Drag dot to pick subgradient; <i>x</i>(<i>u</i>) follows</li>` : "") + `</ul>`;
     const opt = !isOpt ? "" : R.every(i => u[i] > 1e-12) ? ` Since 0 ∈ ∂<i>h</i><sub>${PB()}</sub>(<i>u</i>), <i>u</i> is optimal.` : OPT0;
     scap.innerHTML = `<span class="hid" aria-hidden="true">${cap(true, OPT0)}</span><span>${cap(gs.length >= 2, opt)}</span>`;
   }
@@ -1655,14 +1769,12 @@
     labelPx(top.x, top.y - 8, [["h", "it"], [PB(), "sub"], [` ${fmt(hi)}`, ""]], { "text-anchor": "middle", class: "small" }, dsvg);
 
     dcap.innerHTML =
-      `<ul><li>Each face corresponds to the extreme point with the same color; level curves at every ${fmt(F.step)}.</li>` +
-      `<li>Drag the point to set <i>u</i>; drag elsewhere to rotate.</li>` +
+      `<ul><li>Face per extreme point (same color); level curves every ${fmt(F.step)}</li>` +
+      `<li>Drag point to set <i>u</i>; drag elsewhere to rotate</li>` +
       (!SUBGRADIENTS ? "</ul>" :
-      `<li>The gray plane is a supporting plane with gradient <i>g</i>(<i>x</i>(<i>u</i>)); on an edge or corner ` +
-      `there are multiple subgradients, and the plane tilts as <i>g</i>(<i>x</i>(<i>u</i>)) is dragged below.</li>` +
-      `<li>Optimality requires complementarity; some <i>g</i> &isin; &part;<i>h</i><sub>${PB()}</sub>(<i>u</i>) has, for each <i>i</i>, either` +
-      `<ol><li><i>u</i><sub><i>i</i></sub> = 0 and <i>g</i><sub><i>i</i></sub> &le; 0, or</li>` +
-      `<li><i>u</i><sub><i>i</i></sub> &gt; 0 and <i>g</i><sub><i>i</i></sub> = 0.</li></ol></li></ul>`);
+      `<li>Gray: supporting plane, gradient <i>g</i>(<i>x</i>(<i>u</i>)); on edges/corners, tilts as <i>g</i> is dragged below</li>` +
+      `<li>Optimal iff some <i>g</i> &isin; &part;<i>h</i><sub>${PB()}</sub>(<i>u</i>) has <i>g</i><sub><i>i</i></sub> &le; 0 where ` +
+      `<i>u</i><sub><i>i</i></sub> = 0, <i>g</i><sub><i>i</i></sub> = 0 where <i>u</i><sub><i>i</i></sub> &gt; 0</li></ul>`);
   }
 
   // One relaxed constraint: one line per extreme point, h_LP is their lower envelope.
@@ -1731,12 +1843,12 @@
       setU(i, o ? o[0] : clamp(U * (x - X0) / (X1 - X0), 0, U), !!o);
     };
     dcap.innerHTML =
-      `<ul><li>Each line corresponds to the extreme point with the same color.</li>` +
+      `<ul><li>Line per extreme point (same color); <i>h</i><sub>${PB()}</sub> = lower envelope</li>` +
+      `<li>Click/drag to set <i>u</i><sub>${i + 1}</sub></li>` +
       (!SUBGRADIENTS ? "</ul>" :
-      `<li>Subdifferential in shaded white; a line when only one subgradient exists, a fan when multiple exist.</li>` +
-      `<li>Optimality requires complementarity; either` +
-      `<ol><li><i>u</i><sub>${i + 1}</sub> = 0 and some subgradient is &le; 0, or</li>` +
-      `<li><i>u</i><sub>${i + 1}</sub> &gt; 0 and 0 &isin; &part;<i>h</i><sub>${PB()}</sub>(<i>u</i>).</li></ol></li></ul>`);
+      `<li>Shaded: subdifferential at <i>u</i> (fan if several subgradients)</li>` +
+      `<li>Optimal iff <i>u</i><sub>${i + 1}</sub> = 0 and some subgradient &le; 0, ` +
+      `or <i>u</i><sub>${i + 1}</sub> &gt; 0 and 0 &isin; &part;<i>h</i><sub>${PB()}</sub>(<i>u</i>)</li></ul>`);
   }
 
   // Both relaxed: map over (u_1, u_2), coloured by the optimal extreme point, with level curves of h_LP.
@@ -1786,11 +1898,12 @@
       setU(0, o ? o[0] : clamp(U[0] * (x - X0) / SIDE, 0, U[0]), !!o);
       setU(1, o ? o[1] : clamp(U[1] * (1 - (y - Y0) / SIDE), 0, U[1]), !!o);
     };
-    dcap.innerHTML =
+    dcap.innerHTML = `<ul>` +
       (mapMode === "value"
-        ? `Color corresponds to the value of <i>h</i><sub>${PB()}</sub>(<i>u</i>), from low (dark) to high (yellow). `
-        : `Color corresponds to optimal extreme point. `) +
-      `Level curves for <i>h</i><sub>${PB()}</sub> shown at every ${fmt(mapCache.step || 0)}. Set <i>u</i> by clicking.`;
+        ? `<li>Color: <i>h</i><sub>${PB()}</sub>(<i>u</i>), low (dark) to high (yellow)</li>`
+        : `<li>Color: optimal extreme point (as in graph)</li>`) +
+      `<li>Level curves every ${fmt(mapCache.step || 0)}; rings: optimal <i>u</i></li>` +
+      `<li>Click/drag to set <i>u</i></li></ul>`;
   }
 
   // Raster of the 2-D dual map (data URL) and the contour step.
@@ -2159,14 +2272,23 @@
   ["pointerup", "pointercancel"].forEach(t => ssvg.addEventListener(t, () => { subDragging = false; }));
   // A tick sets an exact value (step "any"); the slider snaps to 0.01 again as soon as it is touched.
   sliders.forEach(s => ["pointerdown", "keydown"].forEach(t => s.addEventListener(t, () => { s.step = "0.01"; })));
+  // Relaxing or keeping constraint i (the checkboxes in the system, or the button over a kept constraint's slider).
+  function setRelaxed(i, on) {
+    boxes[i].checked = on;
+    if (on) { sliders[i].step = "0.01"; sliders[i].value = "0"; }  // a newly relaxed constraint starts at u_i = 0
+    uAt = null;                                                      // a new subproblem: solved at the sliders
+    render();
+  }
   formula.addEventListener("change", e => {                         // the relax-checkboxes in the system
     const i = e.target.dataset && e.target.dataset.i;
     if (i === undefined) return;
-    boxes[+i].checked = e.target.checked;
-    if (e.target.checked) { sliders[+i].step = "0.01"; sliders[+i].value = "0"; }   // a newly relaxed constraint starts at u_i = 0
-    uAt = null;                                                      // a new subproblem: solved at the sliders
-    render();
+    setRelaxed(+i, e.target.checked);
   });
+  document.querySelectorAll(".offnote").forEach(b => b.addEventListener("click", () => {
+    const i = +b.dataset.i;
+    setRelaxed(i, true);
+    sliders[i].focus();
+  }));
   // Choice of LP. Switching keeps which constraints are relaxed but starts the prices at 0; the choice
   // is kept in the URL (?lp=, and the custom LP in ?lpdef=) so that reloading or sharing the link
   // shows the same LP. "Edit LP" opens a form filled in with the current LP; applying it makes it the custom LP.
@@ -2174,7 +2296,7 @@
   const lpChoice = document.getElementById("lpChoice"), lpCustom = document.getElementById("lpCustom");
   const lpButtons = LPS.map((lp, n) => {
     const b = document.createElement("button");
-    b.type = "button"; b.innerHTML = lp.name;
+    b.type = "button"; b.className = "btn"; b.innerHTML = lp.name; b.title = "Show this example LP";
     b.addEventListener("click", () => { if (lpIndex !== n) switchLP(n); });
     lpChoice.insertBefore(b, lpCustom);
     return b;
@@ -2286,13 +2408,11 @@
     const max = lpForm.querySelector("select.sense").value === "max";
     const ge = [...lpForm.querySelectorAll(".row:not([hidden]) select")].map((s, i) => s.value === ">=" ? i + 1 : 0).filter(Boolean);
     const parts = [];
-    if (max) parts.push("the maximisation is solved as minimisation of the negated objective, \u2212<i>c</i><sup>T</sup><i>x</i> " +
-                        "(so the vector <i>c</i> drawn is the negated one, and objective values change sign)");
-    if (ge.length) parts.push(`${ge.length > 1 ? "the ≥ constraints are" : `the ≥ constraint ${ge[0]} is`} multiplied by \u22121 ` +
-                              "to read ≤ (so its normal and its price act in the opposite direction)");
+    if (max) parts.push("max → min of \u2212<i>c</i><sup>T</sup><i>x</i> (<i>c</i> drawn negated, values change sign)");
+    if (ge.length) parts.push(`≥ ${ge.length > 1 ? "constraints" : `constraint ${ge[0]}`} × \u22121 (normal and price flip)`);
     lpNote.hidden = !parts.length;
-    lpNote.innerHTML = parts.length ? "⚠ This LP will be converted to the form min <i>c</i><sup>T</sup><i>x</i>, " +
-      "<i>A</i><i>x</i> ≤ <i>b</i>: " + parts.join("; ") + "." : "";
+    lpNote.innerHTML = parts.length ? "⚠ Converted to min <i>c</i><sup>T</sup><i>x</i>, " +
+      "<i>A</i><i>x</i> ≤ <i>b</i>: " + parts.join("; ") : "";
   }
   lpForm.addEventListener("change", e => { if (e.target.matches("select")) syncNote(); });
   // The form's values as a spec; an unreadable field is marked and throws.
